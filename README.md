@@ -186,3 +186,14 @@ device test beyond its policy gate. Concurrency beyond one apply at a time is un
   what you already granted.
 - The binary doesn't survive a firmware upgrade (`/etc/config` does, `/usr/bin` doesn't).
   Re-run `make install` afterwards until it's packaged as an `.ipk`/`.apk`.
+
+---
+
+## Licence
+
+Copyright (C) 2026 Ian Williams. Licensed under the **GNU Affero General Public License
+v3.0 or later** — see [LICENSE](LICENSE).
+
+AGPL because this is a network service: if you run a modified version where others can
+reach it, §13 requires you to offer them the source. The daemon does this for itself —
+`GET /health` returns its version and a link to this repository.
