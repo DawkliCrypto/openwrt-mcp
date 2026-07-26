@@ -1,4 +1,6 @@
-ROUTER ?= root@192.168.0.2
+# GL.iNet's default LAN address; override for your own router:
+#   make install ROUTER=root@192.168.1.1
+ROUTER ?= root@192.168.8.1
 GO     ?= /usr/local/go/bin/go
 ARCH   ?= arm64
 
