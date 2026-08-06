@@ -173,7 +173,7 @@ Both were the first choice; neither works for a resident daemon.
 | Tool | Policy scope | |
 |---|---|---|
 | `ubus_list` | *(ungated)* | Objects, methods and argument signatures. The discovery tool. |
-| `ubus_call` | `<object>.<method>` | The workhorse: netifd, wireless, dnsmasq, iwinfo, luci-rpc, `gl-*`. Arrays over 16 elements are pruned out of the reply — see Findings. |
+| `ubus_call` | `<object>.<method>` | The workhorse: netifd, wireless, dnsmasq, iwinfo, luci-rpc, `gl-*`. Replies over 8 KB have long arrays pruned — see Findings. |
 | `uci_apply` | `<config>.<section>.<option>` per change | Stage → snapshot → commit → reload, rollback armed. All scopes must be covered by one policy. |
 | `uci_confirm` | *(tool-level)* | Cancels the rollback timer. |
 | `exec` | `argv[0]` | Direct exec, **no shell** — no pipes, globs or redirection, and no quoting surface. |
@@ -212,9 +212,13 @@ correct, but no firmware flash was performed. Concurrency beyond one apply at a 
 ### Findings from the Flint 4 `gl-*` surface
 
 - **`gl-clients list` is enormous.** With 49 clients attached it returned 100,587 bytes —
-  60 samples of `last_rx` and 60 of `last_tx` per client. `ubus_call` now prunes arrays
-  over 16 elements out of the decoded reply, which brought that call to 43,676 bytes and
-  left it valid JSON. Still not small; the remaining bulk is one legitimate row per client.
+  60 samples of `last_rx` and 60 of `last_tx` per client. `ubus_call` now caps arrays at 16
+  elements in the decoded reply, which brought that call to 43,676 bytes and left it valid
+  JSON. Still not small; the remaining bulk is one legitimate row per client.
+- **Pruning applies only to replies over 8 KB, and only when it actually shrinks them.**
+  Both conditions were added after the first version got it wrong: `ubus call iwinfo devices`
+  returns 17 radio interface names in 196 bytes, and capping that at 16 dropped a real
+  interface while growing the reply to 202 bytes. Not every array is a time series.
 - **Do not grant `gl_screen.*`.** The Flint 4 has a 320x240 LCD and `gl_screen` accepts
   `set`, but `ubus -v list` declares no argument schema and the validation all lives in the
   oui-httpd Lua layer (`check_passcode`, `brightness_min/max`), which `ubus_call` bypasses.
@@ -239,9 +243,9 @@ correct, but no firmware flash was performed. Concurrency beyond one apply at a 
   engine meaningful; an unscoped one reduces it to an audit trail.
 - Rate-limit windows are process-scoped, so a restart resets them — erring toward allowing
   what you already granted.
-- Tool output is capped at 64 KB and long arrays in ubus replies at 16 elements. Both cuts
-  say so in the result, but a caller that needs a full time series has to reach for a
-  narrower ubus method.
+- Tool output is capped at 64 KB, and ubus replies over 8 KB have arrays capped at 16
+  elements. Both cuts say so in the result, but a caller that needs a full time series has
+  to reach for a narrower ubus method.
 - Install with `make install-ipk`, not `make install`, if you want the daemon to survive a
   firmware upgrade — only the packaged form ships the `keep.d` entry.
 
