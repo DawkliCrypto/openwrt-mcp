@@ -1,0 +1,12 @@
+{
+    "index": 90,
+    "view": "openwrt-mcp",
+    "level": 2,
+    "title": "MCP Server",
+    "parent": "applications",
+    "parent_icon": "application",
+    "parent_index": 55,
+    "show_mode": [
+        "router"
+    ]
+}

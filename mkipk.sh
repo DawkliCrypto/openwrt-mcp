@@ -27,11 +27,29 @@ trap 'rm -rf "$BUILD"' EXIT
 
 # ---- data.tar.gz: the files as they land on the router
 DATA="$BUILD/data"
-mkdir -p "$DATA/usr/bin" "$DATA/etc/init.d" "$DATA/etc/config" "$DATA/lib/upgrade/keep.d"
+mkdir -p "$DATA/usr/bin" "$DATA/etc/init.d" "$DATA/etc/config" "$DATA/lib/upgrade/keep.d" \
+         "$DATA/usr/lib/oui-httpd/rpc" "$DATA/usr/share/oui/menu.d"
 install -m 0755 "$BIN"                              "$DATA/usr/bin/$PKG"
 install -m 0755 "$SRC/files/etc/init.d/$PKG"        "$DATA/etc/init.d/$PKG"
 install -m 0644 "$SRC/files/etc/config/$PKG"        "$DATA/etc/config/$PKG"
 install -m 0644 "$SRC/files/lib/upgrade/keep.d/$PKG" "$DATA/lib/upgrade/keep.d/$PKG"
+
+# GL.iNet web UI integration. Harmless on stock OpenWrt: without oui-httpd this is an inert
+# file nothing reads, so the package stays a single artefact for both.
+install -m 0644 "$SRC/files/usr/lib/oui-httpd/rpc/$PKG" "$DATA/usr/lib/oui-httpd/rpc/$PKG"
+
+# The menu entry is only installed once its view bundle exists. A menu.d entry naming a view
+# that is not on disk puts a dead item in the router's UI -- the RPC module on its own is
+# useful (curl it, or drive it from another client) and invisible, which is the right state
+# until there is a page to open.
+VIEW="$SRC/files/www/views/gl-sdk4-ui-$PKG.common.js.gz"
+if [ -f "$VIEW" ]; then
+	mkdir -p "$DATA/www/views"
+	install -m 0644 "$VIEW" "$DATA/www/views/gl-sdk4-ui-$PKG.common.js.gz"
+	install -m 0644 "$SRC/files/usr/share/oui/menu.d/$PKG.json" "$DATA/usr/share/oui/menu.d/$PKG.json"
+else
+	echo "note: no view bundle yet, so the menu entry is not packaged" >&2
+fi
 
 # ---- control.tar.gz: metadata and maintainer scripts
 CTRL="$BUILD/control"

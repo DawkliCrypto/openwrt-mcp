@@ -1,0 +1,64 @@
+-- oui-httpd RPC module for openwrt-mcp.  Read-only, by design.
+--
+-- Loaded by /usr/lib/lua/oui/rpc.lua, which dofile()s this path and takes the returned
+-- table's functions as the callable methods.  Note that the dispatcher does NOT apply ACLs
+-- on a module's behalf -- rpc.access() is opt-in per method -- so every method here gates
+-- itself explicitly rather than inheriting an assumption.
+--
+-- There is deliberately no pair/allow/unpair here.  Those stay CLI-only so that no
+-- network-reachable surface can widen a grant, which is the same property that keeps them
+-- out of the MCP tool list.
+
+local rpc = require "oui.rpc"
+local cjson = require "cjson"
+
+local BIN = "/usr/bin/openwrt-mcp"
+local SCOPE = "openwrt-mcp"
+
+local M = {}
+
+-- Shell out to the daemon's own status command rather than re-reading /etc/config and the
+-- audit log here.  The Go side already owns policy parsing, expiry and redaction; a second
+-- implementation in Lua would drift from what the daemon actually enforces, and a status
+-- pane that disagrees with the enforcer is worse than no pane at all.
+local function read_status(audit_lines)
+    local n = tonumber(audit_lines) or 20
+    if n < 0 then n = 0 end
+    if n > 200 then n = 200 end
+
+    -- Fixed argv shape: n is coerced to a number above, so nothing caller-supplied reaches
+    -- the shell as text.
+    local cmd = string.format("%s status --json --audit %d 2>/dev/null", BIN, n)
+    local h = io.popen(cmd, "r")
+    if not h then return nil, "cannot run " .. BIN end
+
+    local out = h:read("*a")
+    h:close()
+
+    if not out or out == "" then
+        return nil, "no output from " .. BIN .. " (is it installed?)"
+    end
+
+    local ok, decoded = pcall(cjson.decode, out)
+    if not ok or type(decoded) ~= "table" then
+        return nil, "unparseable status output"
+    end
+    return decoded
+end
+
+-- status returns daemon state, paired clients, standing policies and recent audit entries.
+-- Tokens are structurally absent: only SHA-256 digests are stored, and the report carries
+-- neither.
+function M.status(params)
+    if not rpc.access(SCOPE, "status", "r") then
+        return rpc.ERROR_CODE_ACCESS
+    end
+
+    local st, err = read_status(params and params.audit)
+    if not st then
+        return { err_code = rpc.ERROR_CODE_INTERNAL_ERROR, err_msg = err }
+    end
+    return st
+end
+
+return M

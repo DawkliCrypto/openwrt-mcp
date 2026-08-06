@@ -112,6 +112,15 @@ func main() {
 				p.Client, state, strings.Join(p.Tools, ", "), strings.Join(p.Scopes, " "), p.MaxPerMin, exp)
 		}
 
+	case "status":
+		// Backs the router's own web UI via the oui-httpd RPC module; --json is the
+		// machine-readable form of exactly what the text output shows.
+		fs := flag.NewFlagSet("status", flag.ExitOnError)
+		asJSON := fs.Bool("json", false, "emit JSON")
+		lines := fs.Int("audit", 20, "how many recent audit entries to include (0 for none)")
+		must(fs.Parse(args[1:]))
+		must(runStatus(*configPath, *statePath, *lines, *asJSON))
+
 	case "version":
 		fmt.Printf("openwrt-mcp %s\n", version)
 
@@ -180,6 +189,7 @@ func usage() {
   allow    <client> <tools> <scopes> <dur>    grant a standing policy
   revoke                                      (edit %s and restart)
   policies                                    show current grants
+  status   [--json] [--audit N]                daemon state, pairings, grants, recent audit
   version
 
 Reach it from a workstation with:
