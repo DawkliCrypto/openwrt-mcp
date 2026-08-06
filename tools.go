@@ -97,6 +97,18 @@ func (p *pruner) walk(v any) any {
 	return v
 }
 
+// uciScopes derives the policy scopes for an apply. Named rather than inlined so a test can
+// pin the section-level form: a scope of "dhcp.pi" (create the section) is a different
+// permission from "dhcp.pi.ip" (set an option in it), and a policy must cover each on its
+// own terms.
+func uciScopes(in uciApplyIn) []string {
+	var out []string
+	for _, c := range in.Changes {
+		out = append(out, uciKey(c))
+	}
+	return out
+}
+
 // ubusCall is the ubus_call handler. It is a named function rather than a closure so a test
 // can assert that the reply really is pruned on the way out -- deleting the pruneUbusJSON
 // call here has to break something, or the pruner's own unit tests prove nothing about
@@ -175,10 +187,11 @@ type ubusCallIn struct {
 
 type UCIChange struct {
 	Config  string `json:"config" jsonschema:"UCI config name, e.g. 'network'"`
-	Section string `json:"section" jsonschema:"section name, e.g. 'lan' or '@wifi-iface[0]'"`
-	Option  string `json:"option" jsonschema:"option name, e.g. 'ipaddr'"`
+	Section string `json:"section" jsonschema:"section name, e.g. 'lan', 'raspberrypi' or '@wifi-iface[0]'"`
+	Option  string `json:"option,omitempty" jsonschema:"option name, e.g. 'ipaddr'. Omit when creating or deleting a whole section."`
+	Type    string `json:"type,omitempty" jsonschema:"section type, e.g. 'host' or 'rule'. Set this (with no option) to CREATE the named section; put it before the changes that fill it in."`
 	Value   string `json:"value,omitempty" jsonschema:"new value; ignored when delete is true"`
-	Delete  bool   `json:"delete,omitempty" jsonschema:"delete the option instead of setting it"`
+	Delete  bool   `json:"delete,omitempty" jsonschema:"delete the option, or the whole section when option is omitted"`
 }
 
 type uciApplyIn struct {
@@ -230,18 +243,20 @@ func (s *Server) newServerForClient(client string) *mcp.Server {
 		ubusCall)
 
 	addTool(s, srv, client, "uci_apply",
-		"Change router configuration safely. Stages the given UCI options, commits them, and applies "+
-			"with rpcd's rollback timer armed: if uci_confirm is not called before the timeout, the router "+
+		"Change router configuration safely. Stages the given UCI changes, commits them, and applies "+
+			"with a rollback timer armed: if uci_confirm is not called before the timeout, the router "+
 			"automatically reverts everything. Use this rather than 'uci' via exec -- it is the only path "+
-			"that cannot strand you with an unreachable router. "+
-			"Policy scope is \"<config>.<section>.<option>\" for each change, and all must be covered.",
-		func(in uciApplyIn) []string {
-			var out []string
-			for _, c := range in.Changes {
-				out = append(out, fmt.Sprintf("%s.%s.%s", c.Config, c.Section, c.Option))
-			}
-			return out
-		},
+			"that cannot strand you with an unreachable router.\n\n"+
+			"A change sets an option, or -- with 'type' and no 'option' -- creates a named section, so "+
+			"whole objects can be added in one rollback-armed step. To add a static DHCP lease:\n"+
+			"  {config:dhcp, section:pi, type:host}\n"+
+			"  {config:dhcp, section:pi, option:mac, value:'88:a2:9e:8a:e4:15'}\n"+
+			"  {config:dhcp, section:pi, option:ip,  value:'192.168.0.141'}\n"+
+			"Changes run in order, so the creating change must come first. Omit 'option' with "+
+			"'delete' to remove a whole section.\n\n"+
+			"Policy scope is \"<config>.<section>.<option>\", or \"<config>.<section>\" for a "+
+			"section-level change; all must be covered by one policy.",
+		uciScopes,
 		func(ctx context.Context, in uciApplyIn) (string, string, error) {
 			return s.uciApply(ctx, in)
 		})

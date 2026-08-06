@@ -196,6 +196,71 @@ type pendingApply struct {
 
 func (s *Server) pendingPath() string { return path.Join(s.statePath, "pending.json") }
 
+// A change is one of four things, decided by which fields are set:
+//
+//	type set                -> create the section:  uci set dhcp.pi=host
+//	option set              -> set an option:       uci set dhcp.pi.ip=192.168.0.141
+//	option set + delete     -> remove an option:    uci delete dhcp.pi.ip
+//	neither, + delete       -> remove the section:  uci delete dhcp.pi
+//
+// Section creation exists because without it uci_apply cannot express "add a static lease",
+// "add a firewall rule" or "add an interface" -- UCI refuses to set an option on a section
+// that does not exist ("uci: Invalid argument"), so those jobs fell out of the rollback-armed
+// path and into a raw root shell, which is the one thing this tool is for avoiding.
+//
+// Named sections rather than `uci add`: the caller picks the name, so later changes in the
+// same batch can refer to it without knowing a generated id, and re-running the same apply
+// is idempotent where `uci add` would append a duplicate every time.
+func validateChange(c UCIChange) error {
+	if c.Config == "" || c.Section == "" {
+		return fmt.Errorf("each change needs at least a config and a section")
+	}
+	if strings.ContainsAny(c.Config, "/.") {
+		return fmt.Errorf("bad config name %q", c.Config)
+	}
+	if c.Type != "" {
+		if c.Option != "" {
+			return fmt.Errorf("%s.%s: type creates a section, so it cannot be combined with option",
+				c.Config, c.Section)
+		}
+		if c.Delete {
+			return fmt.Errorf("%s.%s: type creates a section, so it cannot be combined with delete",
+				c.Config, c.Section)
+		}
+		if strings.ContainsAny(c.Type, "/.=") {
+			return fmt.Errorf("bad section type %q", c.Type)
+		}
+		return nil
+	}
+	if c.Option == "" && !c.Delete {
+		return fmt.Errorf("%s.%s: needs an option to set, a type to create the section, "+
+			"or delete to remove the whole section", c.Config, c.Section)
+	}
+	return nil
+}
+
+// uciKey is the change's identity for error messages and policy scope: "config.section" for
+// anything section-level, "config.section.option" otherwise. Creating a section is a
+// different permission from setting an option in one, and the scope string says so.
+func uciKey(c UCIChange) string {
+	if c.Option == "" {
+		return c.Config + "." + c.Section
+	}
+	return c.Config + "." + c.Section + "." + c.Option
+}
+
+func uciArgv(c UCIChange) []string {
+	switch {
+	case c.Type != "":
+		return []string{"uci", "set", uciKey(c) + "=" + c.Type}
+	case c.Delete:
+		// Covers both the option and the whole-section case; uciKey already picked which.
+		return []string{"uci", "delete", uciKey(c)}
+	default:
+		return []string{"uci", "set", uciKey(c) + "=" + c.Value}
+	}
+}
+
 func (s *Server) uciApply(ctx context.Context, in uciApplyIn) (string, string, error) {
 	if len(in.Changes) == 0 {
 		return "", "", fmt.Errorf("changes must not be empty")
@@ -220,11 +285,8 @@ func (s *Server) uciApply(ctx context.Context, in uciApplyIn) (string, string, e
 	// clobber an unrelated change made by another process during the confirmation window.
 	configs := map[string]bool{}
 	for _, c := range in.Changes {
-		if c.Config == "" || c.Section == "" || c.Option == "" {
-			return "", "", fmt.Errorf("each change needs config, section and option")
-		}
-		if strings.ContainsAny(c.Config, "/.") {
-			return "", "", fmt.Errorf("bad config name %q", c.Config)
+		if err := validateChange(c); err != nil {
+			return "", "", err
 		}
 		configs[c.Config] = true
 	}
@@ -245,13 +307,8 @@ func (s *Server) uciApply(ctx context.Context, in uciApplyIn) (string, string, e
 	}
 
 	for _, c := range in.Changes {
-		key := fmt.Sprintf("%s.%s.%s", c.Config, c.Section, c.Option)
-		var argv []string
-		if c.Delete {
-			argv = []string{"uci", "delete", key}
-		} else {
-			argv = []string{"uci", "set", key + "=" + c.Value}
-		}
+		key := uciKey(c)
+		argv := uciArgv(c)
 		if out, err := run(ctx, defaultCmdTimeout, argv...); err != nil {
 			_, _ = run(ctx, defaultCmdTimeout, "uci", "revert", c.Config)
 			_ = os.Remove(snapshot)
