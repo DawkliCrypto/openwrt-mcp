@@ -42,13 +42,20 @@ install -m 0644 "$SRC/files/usr/lib/oui-httpd/rpc/$PKG" "$DATA/usr/lib/oui-httpd
 # that is not on disk puts a dead item in the router's UI -- the RPC module on its own is
 # useful (curl it, or drive it from another client) and invisible, which is the right state
 # until there is a page to open.
-VIEW="$SRC/files/www/views/gl-sdk4-ui-$PKG.common.js.gz"
-if [ -f "$VIEW" ]; then
-	mkdir -p "$DATA/www/views"
-	install -m 0644 "$VIEW" "$DATA/www/views/gl-sdk4-ui-$PKG.common.js.gz"
+# The view is gzipped here rather than committed as a binary: ui/view.js stays the single
+# readable source. nginx has gzip_static on, so shipping only the .gz is what the SPA's
+# request for the plain .js name resolves to.
+VIEW_SRC="$SRC/ui/view.js"
+if [ -f "$VIEW_SRC" ]; then
+	mkdir -p "$DATA/www/views" "$DATA/www/i18n"
+	gzip -9 -c "$VIEW_SRC" > "$DATA/www/views/gl-sdk4-ui-$PKG.common.js.gz"
+	chmod 0644 "$DATA/www/views/gl-sdk4-ui-$PKG.common.js.gz"
 	install -m 0644 "$SRC/files/usr/share/oui/menu.d/$PKG.json" "$DATA/usr/share/oui/menu.d/$PKG.json"
+	for lang in "$SRC/files/www/i18n/gl-sdk4-ui-$PKG."*.json; do
+		[ -f "$lang" ] && install -m 0644 "$lang" "$DATA/www/i18n/$(basename "$lang")"
+	done
 else
-	echo "note: no view bundle yet, so the menu entry is not packaged" >&2
+	echo "note: no ui/view.js, so the view and its menu entry are not packaged" >&2
 fi
 
 # ---- control.tar.gz: metadata and maintainer scripts
