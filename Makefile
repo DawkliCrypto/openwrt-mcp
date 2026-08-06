@@ -1,7 +1,9 @@
 # GL.iNet's default LAN address; override for your own router:
 #   make install ROUTER=root@192.168.1.1
 ROUTER ?= root@192.168.8.1
-GO     ?= /usr/local/go/bin/go
+# Whatever `go` is on PATH. Override for a specific toolchain:
+#   make build GO=/usr/local/go/bin/go
+GO     ?= go
 ARCH   ?= arm64
 
 # OpenWrt's dropbear has no sftp-server, so modern scp (which defaults to SFTP)

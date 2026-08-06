@@ -3,6 +3,10 @@
 An MCP server that runs **on** an OpenWrt router, so Claude Code (or any MCP client) can
 inspect and change it over an SSH tunnel.
 
+Developed against **GL.iNet** routers — verified on a Flint 2 and a Flint 4 (GL-BE14000).
+GL.iNet firmware 4.x is OpenWrt 21.02 with `opkg`, which is what the `.ipk` targets. It
+should suit any `opkg`-based OpenWrt; stock OpenWrt 24.10+ moved to `apk` and is **untested**.
+
 The other OpenWrt MCP servers I could find run *off*-router — they SSH in from your
 workstation on every call. This one is resident: a single static Go binary under procd,
 always on, with its own authorisation and audit trail.
@@ -97,32 +101,96 @@ identifiers, and redacting them would make the log useless.
 
 ## Install
 
-As a package — this is the one that survives a firmware upgrade:
+`ROUTER` below is your router's LAN address. GL.iNet ships `192.168.8.1`; change it if you
+have. Everything is `root@`, because that is the only account OpenWrt has.
+
+### 1. Set up SSH key auth (required)
+
+The install pipes over `ssh` non-interactively, so password auth is not enough. A factory
+router has no `authorized_keys` yet:
 
 ```sh
-make install-ipk ROUTER=root@192.168.8.1
+ssh-keygen -f ~/.ssh/known_hosts -R 192.168.8.1   # only if that IP held another device before
+ssh-copy-id root@192.168.8.1                      # asks for the router password, once
+ssh root@192.168.8.1 true                         # must succeed with no prompt
 ```
 
-Or straight onto the filesystem, no packaging:
+Leave the router's password auth enabled — it is your way back in if the key is ever lost.
+
+### 2. Install the daemon
+
+Download `openwrt-mcp_*.ipk` from [Releases](https://github.com/GlassOnTin/openwrt-mcp/releases)
+and push it over — no toolchain needed:
 
 ```sh
-make install ROUTER=root@192.168.8.1
+ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_0.2.0_aarch64_cortex-a53.ipk
+ssh root@192.168.8.1 'opkg install /tmp/openwrt-mcp.ipk && rm -f /tmp/openwrt-mcp.ipk'
 ```
 
-Then pair a client and grant it something:
+Or build it yourself — needs **Go 1.26+** on your workstation, nothing on the router:
 
 ```sh
-ssh root@192.168.8.1 'openwrt-mcp pair claude-code'      # prints the token ONCE
-ssh root@192.168.8.1 "openwrt-mcp allow claude-code ubus_call,logread 'network.* iwinfo.*' 30d"
+make install-ipk ROUTER=root@192.168.8.1   # packaged; survives a firmware upgrade
+make install     ROUTER=root@192.168.8.1   # straight onto the filesystem, no packaging
 ```
 
-Connect over a tunnel — the daemon refuses to bind anything but loopback:
+The router needs no Go, no compiler and no OpenWrt SDK: the binary is statically linked and
+cross-compiled on your machine. `make` uses whatever `go` is on your PATH; override with
+`make install-ipk GO=/usr/local/go/bin/go` if you keep it somewhere unusual.
+
+### 3. Pair a client and grant it something
+
+`pair` prints the token **once** — capture it, it is not recoverable:
+
+```sh
+TOK=$(ssh root@192.168.8.1 'openwrt-mcp pair claude-code')
+ssh root@192.168.8.1 "openwrt-mcp allow claude-code ubus_list,ubus_call,logread 'network.* iwinfo.* system.*' 30d"
+```
+
+Nothing is granted by default. Start narrow: a refusal names the uncovered scope and prints
+the exact `allow` line that would widen it, so it is cheap to loosen and expensive to notice
+you were too loose.
+
+### 4. Connect over a tunnel
+
+The daemon refuses to bind anything but loopback, so reach it through SSH:
 
 ```sh
 ssh -N -f -L 8730:127.0.0.1:8730 root@192.168.8.1
 claude mcp add --transport http openwrt http://127.0.0.1:8730/mcp \
   --header "Authorization: Bearer $TOK"
 ```
+
+Pick a different local port if 8730 is taken on your workstation — `-L 8731:127.0.0.1:8730`,
+and point the client at 8731 to match.
+
+To keep the tunnel up across reboots and drops, run it under systemd rather than by hand:
+
+```ini
+# ~/.config/systemd/user/openwrt-mcp-tunnel.service
+[Unit]
+Description=SSH tunnel to openwrt-mcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+    -L 8730:127.0.0.1:8730 root@192.168.8.1
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+systemctl --user enable --now openwrt-mcp-tunnel
+```
+
+No `autossh` needed: `Restart=always` handles respawn, and the `ServerAlive` options plus
+`ExitOnForwardFailure` cover the case autossh exists for — a connection that is up but dead.
 
 > OpenWrt's dropbear has no `sftp-server`, so plain `scp` fails with "Connection closed".
 > The Makefile pipes over ssh instead; use `scp -O` if you're copying files by hand.
