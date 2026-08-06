@@ -1,0 +1,12 @@
+# Files sysupgrade must carry across a firmware flash.
+#
+# /etc/config/* is preserved by OpenWrt already, but /usr/bin and /etc/init.d are not:
+# without this the daemon vanishes on every firmware upgrade and has to be reinstalled
+# by hand. GL.iNet's own packages use the same mechanism (see the keep.d entry shipped
+# by gl-sdk4-screen-large).
+#
+# The tokens and audit log live under /etc/openwrt-mcp and are listed explicitly --
+# losing the token store would silently unpair every client.
+/usr/bin/openwrt-mcp
+/etc/init.d/openwrt-mcp
+/etc/openwrt-mcp

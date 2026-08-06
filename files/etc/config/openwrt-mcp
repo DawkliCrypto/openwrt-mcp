@@ -1,0 +1,24 @@
+config server
+	# Loopback only, always. The daemon refuses to start on a routable address.
+	# Reach it from a workstation with:
+	#   ssh -N -L 8730:127.0.0.1:8730 root@router
+	option listen '127.0.0.1:8730'
+	option audit '/etc/openwrt-mcp/audit.jsonl'
+	option audit_max_mb '16'
+
+# No policies by default: every gated tool is denied until you grant it.
+# ubus_list is the one exception -- introspection is always permitted, so an agent
+# can discover what the router offers before asking for anything.
+#
+# Grant with, for example:
+#   openwrt-mcp allow claude-code ubus_call,logread 'network.* iwinfo.* gl-*' 30d
+#
+# config policy
+#	option client       'claude-code'
+#	list   tools        'ubus_call'
+#	list   tools        'logread'
+#	list   scopes       'network.*'
+#	list   scopes       'iwinfo.*'
+#	option max_per_min  '60'
+#	option expires      '2026-12-31'
+#	option enabled      '1'

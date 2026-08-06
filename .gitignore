@@ -1,2 +1,6 @@
-openwrt-mcp
-openwrt-mcp.*
+# Build output only. These patterns are anchored to the repo root on purpose: an
+# unanchored "openwrt-mcp" also matches files/lib/upgrade/keep.d/openwrt-mcp and every
+# other payload file named after the package, and silently drops them from commits.
+/openwrt-mcp
+/openwrt-mcp.*
+/*.ipk
