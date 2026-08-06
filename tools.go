@@ -120,10 +120,21 @@ func ubusCall(ctx context.Context, in ubusCallIn) (string, string, error) {
 	return out, in.Object + "." + in.Method, err
 }
 
-// pruneUbusJSON shortens long arrays in a ubus reply. Non-JSON output (ubus error text)
-// and replies with nothing to prune are returned untouched, so the common case is
-// byte-for-byte what ubus printed.
+// pruneMinBytes is the size below which a reply is returned whole, however long its arrays.
+//
+// Not every array is a time series. `ubus call iwinfo devices` returns 17 radio interface
+// names in 196 bytes: capping that at 16 discards a real interface, and the result was
+// measured at 202 bytes -- longer than the original once the notice is added. Pruning has to
+// earn its data loss, and on a reply small enough to read whole it never can.
+const pruneMinBytes = 8 << 10
+
+// pruneUbusJSON shortens long arrays in a ubus reply. Non-JSON output (ubus error text),
+// small replies, and replies with nothing to prune are returned untouched, so the common
+// case is byte-for-byte what ubus printed.
 func pruneUbusJSON(out string) string {
+	if len(out) < pruneMinBytes {
+		return out
+	}
 	var v any
 	if json.Unmarshal([]byte(out), &v) != nil {
 		return out
@@ -135,6 +146,10 @@ func pruneUbusJSON(out string) string {
 	}
 	b, err := json.MarshalIndent(pruned, "", "\t")
 	if err != nil {
+		return out
+	}
+	// Belt and braces: re-indenting can outweigh what the pruning saved.
+	if len(b) >= len(out) {
 		return out
 	}
 	return fmt.Sprintf("%s\n\n[pruned: %d array element(s) dropped, arrays capped at %d; %d -> %d bytes. "+

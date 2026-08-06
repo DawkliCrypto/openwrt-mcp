@@ -99,17 +99,104 @@ func TestPruneUbusJSONPassesThroughNonJSON(t *testing.T) {
 	}
 }
 
-func TestPruneUbusJSONBoundary(t *testing.T) {
-	// Exactly at the cap: nothing to drop, so nothing may change.
-	at := `{"a":[` + strings.TrimSuffix(strings.Repeat(`1,`, maxArrayElems), ",") + `]}`
-	if out := pruneUbusJSON(at); out != at {
-		t.Errorf("array of exactly %d elements was pruned: %q", maxArrayElems, out)
+// Regression: the first version of the pruner capped every array regardless of reply size.
+// A smoke test caught it on `ubus call iwinfo devices` -- 17 radio interface names in 196
+// bytes. It dropped a real interface AND the output grew to 202 bytes. This is the verbatim
+// reply from a GL-BE14000.
+func TestPruneUbusJSONLeavesShortListsIntact(t *testing.T) {
+	in := "{\n\t\"devices\": [\n\t\t\"ra1\",\n\t\t\"rai15\",\n\t\t\"rai2\",\n\t\t\"rax2\",\n\t\t\"rai0\"," +
+		"\n\t\t\"rax0\",\n\t\t\"rax15\",\n\t\t\"apcli0\",\n\t\t\"ra2\",\n\t\t\"rai3\",\n\t\t\"ra0\"," +
+		"\n\t\t\"rai1\",\n\t\t\"rax1\",\n\t\t\"ra15\",\n\t\t\"apclii0\",\n\t\t\"apclix0\",\n\t\t\"ra3\"\n\t]\n}\n"
+
+	out := pruneUbusJSON(in)
+	if out != in {
+		t.Errorf("a 17-element list in %d bytes was pruned; short replies must survive whole:\n%s",
+			len(in), out)
 	}
-	// One over: exactly one element dropped.
-	over := `{"a":[` + strings.TrimSuffix(strings.Repeat(`1,`, maxArrayElems+1), ",") + `]}`
-	out := pruneUbusJSON(over)
-	if !strings.Contains(out, "...+1 more") {
-		t.Errorf("array of %d elements was not pruned: %q", maxArrayElems+1, out)
+	if strings.Contains(out, "...+") {
+		t.Error("a real interface name was replaced by a truncation marker")
+	}
+}
+
+// Pruning must never make the output longer than what it replaced.
+//
+// A big reply whose only long array is barely over the cap and holds tiny values: dropping
+// one 1-byte element to insert a 12-byte marker costs more than it saves, and the trailing
+// notice costs more again. The size gate does not catch this -- the reply is over the
+// threshold -- so only the never-grow check keeps it honest.
+func TestPruneUbusJSONNeverGrowsTheReply(t *testing.T) {
+	items := make([]any, maxArrayElems+1)
+	for i := range items {
+		items[i] = i
+	}
+	b, _ := json.MarshalIndent(map[string]any{
+		"pad": strings.Repeat("p", pruneMinBytes),
+		"a":   items,
+	}, "", "\t")
+	in := string(b)
+	if len(in) < pruneMinBytes {
+		t.Fatalf("fixture is %d bytes, needs to exceed the %d-byte gate", len(in), pruneMinBytes)
+	}
+
+	out := pruneUbusJSON(in)
+	if len(out) > len(in) {
+		t.Errorf("pruning grew the reply: %d -> %d bytes", len(in), len(out))
+	}
+	if out != in {
+		t.Error("a prune that saves nothing should return the reply untouched")
+	}
+}
+
+// The cap boundary is tested on the pruner itself, not through pruneUbusJSON. The wrapper
+// declines any prune that does not shrink the reply, and trading one "1" for a
+// "...+1 more" marker does not -- so exercising the cap through it would measure the
+// economics, not the boundary.
+func TestPrunerCapBoundary(t *testing.T) {
+	arr := func(n int) []any {
+		out := make([]any, n)
+		for i := range out {
+			out[i] = float64(i)
+		}
+		return out
+	}
+
+	// Exactly at the cap: untouched, nothing counted as dropped.
+	p := &pruner{maxElems: maxArrayElems}
+	got := p.walk(arr(maxArrayElems)).([]any)
+	if len(got) != maxArrayElems || p.dropped != 0 {
+		t.Errorf("at the cap: %d elements, dropped=%d; want %d, 0", len(got), p.dropped, maxArrayElems)
+	}
+
+	// One over: 16 kept plus a marker, one counted as dropped.
+	p = &pruner{maxElems: maxArrayElems}
+	got = p.walk(arr(maxArrayElems + 1)).([]any)
+	if len(got) != maxArrayElems+1 || p.dropped != 1 {
+		t.Fatalf("one over: %d elements, dropped=%d; want %d, 1", len(got), p.dropped, maxArrayElems+1)
+	}
+	if got[len(got)-1] != "...+1 more" {
+		t.Errorf("marker = %v, want \"...+1 more\"", got[len(got)-1])
+	}
+	// The kept elements must be the first N, in order.
+	if got[0] != float64(0) || got[maxArrayElems-1] != float64(maxArrayElems-1) {
+		t.Error("pruning did not keep the first N elements in order")
+	}
+
+	// Nested arrays are pruned too, and every drop is counted.
+	p = &pruner{maxElems: maxArrayElems}
+	p.walk(map[string]any{"x": arr(20), "y": map[string]any{"z": arr(30)}})
+	if p.dropped != 4+14 {
+		t.Errorf("nested drops = %d, want %d", p.dropped, 4+14)
+	}
+}
+
+// The size gate is about the reply, not the array: a long array inside a small reply stays.
+func TestPruneUbusJSONSizeGateDominates(t *testing.T) {
+	small, _ := json.Marshal(map[string]any{"a": make([]int, 500)})
+	if len(small) >= pruneMinBytes {
+		t.Fatalf("fixture is %d bytes, must be under the %d-byte gate", len(small), pruneMinBytes)
+	}
+	if out := pruneUbusJSON(string(small)); out != string(small) {
+		t.Error("a 500-element array in a sub-threshold reply was pruned")
 	}
 }
 
