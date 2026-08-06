@@ -1,0 +1,10 @@
+# Temporary diagnostic: does ANY push-triggered workflow run in this repo?
+name: ping
+on:
+  push:
+    branches: [ main ]
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "push trigger works"
