@@ -58,6 +58,22 @@ uci_confirm {"token": "3Kc681oIe4IP"}
   -> "Confirmed. Rollback cancelled."
 ```
 
+A change with `type` and no `option` **creates** a section, so whole objects go in under one
+rollback. Pinning a DHCP lease is one call:
+
+```
+uci_apply {"changes": [
+  {"config":"dhcp","section":"raspberrypi","type":"host"},
+  {"config":"dhcp","section":"raspberrypi","option":"mac","value":"88:a2:9e:8a:e4:15"},
+  {"config":"dhcp","section":"raspberrypi","option":"ip","value":"192.168.0.141"},
+  {"config":"dhcp","section":"raspberrypi","option":"network","value":"lan"}]}
+```
+
+Changes run in order, so the creating change comes first. `delete` with no `option` removes
+the whole section. Sections are **named**, not `uci add` anonymous ones: later changes in the
+same batch can refer to the name, and re-running an apply is idempotent where `uci add` would
+append a duplicate every time.
+
 If the daemon is restarted mid-window the change is rolled back on startup, because nobody
 ever vouched for it.
 
@@ -174,7 +190,7 @@ Both were the first choice; neither works for a resident daemon.
 |---|---|---|
 | `ubus_list` | *(ungated)* | Objects, methods and argument signatures. The discovery tool. |
 | `ubus_call` | `<object>.<method>` | The workhorse: netifd, wireless, dnsmasq, iwinfo, luci-rpc, `gl-*`. Replies over 8 KB have long arrays pruned — see Findings. |
-| `uci_apply` | `<config>.<section>.<option>` per change | Stage → snapshot → commit → reload, rollback armed. All scopes must be covered by one policy. |
+| `uci_apply` | `<config>.<section>.<option>`, or `<config>.<section>` for a section-level change | Stage → snapshot → commit → reload, rollback armed. Sets options, and creates or deletes whole sections. All scopes must be covered by one policy. |
 | `uci_confirm` | *(tool-level)* | Cancels the rollback timer. |
 | `exec` | `argv[0]` | Direct exec, **no shell** — no pipes, globs or redirection, and no quoting surface. |
 | `logread` | *(tool-level)* | Split out from `exec` so logs can be granted without a root shell. |
@@ -188,7 +204,10 @@ MT7988A, 2GB/64GB). The Flint 4 turned out to run the *same* base — OpenWrt 21
 kernel 5.4.281, `aarch64_cortex-a53`, GL firmware 4.9.0 — so uci, ubus, procd and dropbear
 behave identically and only the vendor `gl-*` layer differs.
 
-**Verified on the Flint 4:** bearer auth (401 missing, 401 wrong, 200 valid, all three in the
+**Verified on the Flint 4:** a real static DHCP lease pinned end to end — one `uci_apply`
+deleting an anonymous `@host[2]`, creating a named `host` section and setting four options,
+verified against dnsmasq's generated `dhcp-host=` line and a DNS lookup before confirming;
+bearer auth (401 missing, 401 wrong, 200 valid, all three in the
 audit log); the scope gate refusing an out-of-scope object *and* printing the `allow` line
 that would grant it; `uci_apply` rollback-on-timeout restoring `/etc/config/system`
 byte-identically against an independent `sha256sum` baseline; `uci_confirm` cancelling the
