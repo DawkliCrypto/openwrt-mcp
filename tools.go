@@ -39,11 +39,107 @@ func run(ctx context.Context, timeout time.Duration, argv ...string) (string, er
 	return out, err
 }
 
+// maxResultBytes caps what any tool may return. A tool result lands in an agent's context
+// window, so an unbounded one is a denial of service against the thing calling it. This is
+// the backstop for output no structural pruning understands -- exec, logread, ubus replies
+// that are one enormous object rather than long arrays.
+const maxResultBytes = 64 << 10
+
 func textResult(s string) *mcp.CallToolResult {
 	if strings.TrimSpace(s) == "" {
 		s = "(no output)"
 	}
+	if len(s) > maxResultBytes {
+		// Marked loudly: a silently truncated result reads as a complete one.
+		s = s[:maxResultBytes] + fmt.Sprintf(
+			"\n\n[TRUNCATED: %d bytes total, %d shown. Output is cut mid-stream and may not parse. "+
+				"Narrow the request -- a more specific ubus method, a logread pattern, or a filter.]",
+			len(s), maxResultBytes)
+	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
+}
+
+// maxArrayElems is how many elements of a long array survive pruning.
+const maxArrayElems = 16
+
+// pruner collapses long arrays in a decoded ubus reply, counting what it drops so the
+// caller can tell "nothing to prune" from "pruned to nothing".
+//
+// The motivating case is measured, not hypothetical: on a GL-BE14000 with 49 clients
+// attached, `ubus call gl-clients list` returned 100,587 bytes -- 60 samples of last_rx and
+// 60 of last_tx per client, a wall of numbers that answers no question anyone asked.
+// Pruning the decoded tree rather than truncating the string keeps the result parseable,
+// which is the entire point.
+type pruner struct {
+	maxElems int
+	dropped  int
+}
+
+func (p *pruner) walk(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, e := range t {
+			t[k] = p.walk(e)
+		}
+		return t
+	case []any:
+		for i, e := range t {
+			t[i] = p.walk(e)
+		}
+		if len(t) > p.maxElems {
+			n := len(t) - p.maxElems
+			p.dropped += n
+			// Full slice expression: never write the marker into the caller's backing array.
+			return append(t[:p.maxElems:p.maxElems], fmt.Sprintf("...+%d more", n))
+		}
+		return t
+	}
+	return v
+}
+
+// ubusCall is the ubus_call handler. It is a named function rather than a closure so a test
+// can assert that the reply really is pruned on the way out -- deleting the pruneUbusJSON
+// call here has to break something, or the pruner's own unit tests prove nothing about
+// whether the tool uses it.
+func ubusCall(ctx context.Context, in ubusCallIn) (string, string, error) {
+	if in.Object == "" || in.Method == "" {
+		return "", "", fmt.Errorf("object and method are required")
+	}
+	argv := []string{"ubus", "call", in.Object, in.Method}
+	if len(in.Args) > 0 {
+		b, err := json.Marshal(in.Args)
+		if err != nil {
+			return "", "", fmt.Errorf("args not encodable: %w", err)
+		}
+		argv = append(argv, string(b))
+	}
+	out, err := run(ctx, defaultCmdTimeout, argv...)
+	if err == nil {
+		out = pruneUbusJSON(out)
+	}
+	return out, in.Object + "." + in.Method, err
+}
+
+// pruneUbusJSON shortens long arrays in a ubus reply. Non-JSON output (ubus error text)
+// and replies with nothing to prune are returned untouched, so the common case is
+// byte-for-byte what ubus printed.
+func pruneUbusJSON(out string) string {
+	var v any
+	if json.Unmarshal([]byte(out), &v) != nil {
+		return out
+	}
+	p := &pruner{maxElems: maxArrayElems}
+	pruned := p.walk(v)
+	if p.dropped == 0 {
+		return out
+	}
+	b, err := json.MarshalIndent(pruned, "", "\t")
+	if err != nil {
+		return out
+	}
+	return fmt.Sprintf("%s\n\n[pruned: %d array element(s) dropped, arrays capped at %d; %d -> %d bytes. "+
+		"Use a narrower ubus method if you need the full series.]",
+		b, p.dropped, maxArrayElems, len(out), len(b))
 }
 
 func errResult(s string) *mcp.CallToolResult {
@@ -116,21 +212,7 @@ func (s *Server) newServerForClient(client string) *mcp.Server {
 			"iwinfo, luci-rpc and the vendor's gl-* objects are all reachable through it. "+
 			"Policy scope is the string \"<object>.<method>\".",
 		func(in ubusCallIn) []string { return []string{in.Object + "." + in.Method} },
-		func(ctx context.Context, in ubusCallIn) (string, string, error) {
-			if in.Object == "" || in.Method == "" {
-				return "", "", fmt.Errorf("object and method are required")
-			}
-			argv := []string{"ubus", "call", in.Object, in.Method}
-			if len(in.Args) > 0 {
-				b, err := json.Marshal(in.Args)
-				if err != nil {
-					return "", "", fmt.Errorf("args not encodable: %w", err)
-				}
-				argv = append(argv, string(b))
-			}
-			out, err := run(ctx, defaultCmdTimeout, argv...)
-			return out, in.Object + "." + in.Method, err
-		})
+		ubusCall)
 
 	addTool(s, srv, client, "uci_apply",
 		"Change router configuration safely. Stages the given UCI options, commits them, and applies "+
