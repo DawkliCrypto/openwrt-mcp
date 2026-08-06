@@ -81,6 +81,14 @@ identifiers, and redacting them would make the log useless.
 
 ## Install
 
+As a package — this is the one that survives a firmware upgrade:
+
+```sh
+make install-ipk ROUTER=root@192.168.8.1
+```
+
+Or straight onto the filesystem, no packaging:
+
 ```sh
 make install ROUTER=root@192.168.8.1
 ```
@@ -102,6 +110,23 @@ claude mcp add --transport http openwrt http://127.0.0.1:8730/mcp \
 
 > OpenWrt's dropbear has no `sftp-server`, so plain `scp` fails with "Connection closed".
 > The Makefile pipes over ssh instead; use `scp -O` if you're copying files by hand.
+
+### Packaging notes
+
+`mkipk.sh` builds the `.ipk` without the OpenWrt SDK — the binary is `CGO_ENABLED=0` static
+Go, so there is nothing to cross-link and only the archive format is left. Two details cost
+real time, both verified on opkg 1bf042dd (2021-06-13):
+
+- **The container is a gzipped tar, not an `ar` archive.** `.ipk` exists in both forms and
+  most documentation describes the `ar` one (identical to `.deb`). This opkg rejects `ar`
+  with `pkg_init_from_file: Malformed package file` — both binutils' output *and* hand-written
+  headers without binutils' trailing-slash name quirk.
+- **`/etc/config/openwrt-mcp` is declared a conffile**, so an upgrade never clobbers live
+  policies or pairings; opkg parks the new default at `…-opkg` instead.
+
+The package also ships `/lib/upgrade/keep.d/openwrt-mcp`, which is how the binary, the init
+script and the token store survive `sysupgrade`. GL.iNet's own packages use the same
+mechanism.
 
 ---
 
@@ -148,7 +173,7 @@ Both were the first choice; neither works for a resident daemon.
 | Tool | Policy scope | |
 |---|---|---|
 | `ubus_list` | *(ungated)* | Objects, methods and argument signatures. The discovery tool. |
-| `ubus_call` | `<object>.<method>` | The workhorse: netifd, wireless, dnsmasq, iwinfo, luci-rpc, `gl-*`. |
+| `ubus_call` | `<object>.<method>` | The workhorse: netifd, wireless, dnsmasq, iwinfo, luci-rpc, `gl-*`. Arrays over 16 elements are pruned out of the reply — see Findings. |
 | `uci_apply` | `<config>.<section>.<option>` per change | Stage → snapshot → commit → reload, rollback armed. All scopes must be covered by one policy. |
 | `uci_confirm` | *(tool-level)* | Cancels the rollback timer. |
 | `exec` | `argv[0]` | Direct exec, **no shell** — no pipes, globs or redirection, and no quoting surface. |
@@ -158,22 +183,52 @@ Both were the first choice; neither works for a resident daemon.
 
 ## Status
 
-Written against a GL.iNet **Flint 2** (OpenWrt 21.02-SNAPSHOT, kernel 5.4, aarch64), ahead
-of a **Flint 4** (GL-BE14000, MT7988A, 2GB/64GB).
+Written against a GL.iNet **Flint 2**, now also verified on a **Flint 4** (GL-BE14000,
+MT7988A, 2GB/64GB). The Flint 4 turned out to run the *same* base — OpenWrt 21.02-SNAPSHOT,
+kernel 5.4.281, `aarch64_cortex-a53`, GL firmware 4.9.0 — so uci, ubus, procd and dropbear
+behave identically and only the vendor `gl-*` layer differs.
 
-**Verified on hardware:** bearer auth (401 on missing/wrong, 200 on valid, both audited);
-revocation taking effect without a restart; the scope gate refusing an out-of-scope object;
-rollback-on-timeout restoring `/etc/config/system` byte-identically against an independent
-backup; confirm cancelling the timer (value survived 20s past a 15s deadline); per-client
-policy isolation; and the whole path over a real `ssh -L` tunnel.
+**Verified on the Flint 4:** bearer auth (401 missing, 401 wrong, 200 valid, all three in the
+audit log); the scope gate refusing an out-of-scope object *and* printing the `allow` line
+that would grant it; `uci_apply` rollback-on-timeout restoring `/etc/config/system`
+byte-identically against an independent `sha256sum` baseline; `uci_confirm` cancelling the
+timer (value survived 25s past a 15s deadline, snapshot cleaned up); `exec` running a granted
+`argv[0]`, refusing an ungranted one, and passing `|` through as a literal argument rather
+than a pipe; `.ipk` install, conffile preservation and service enable via postinst; and the
+whole path over a real `ssh -L` tunnel.
 
-21 unit tests pass. They're mutation-checked: neutering `Authorise` fails 5 of them,
-neutering `redact` fails 2.
+**Verified previously on the Flint 2 and not re-run here:** revocation taking effect without
+a restart, per-client policy isolation.
 
-**Not verified:** anything on the Flint 4 — expect a newer OpenWrt base, different `ubus`
-object names and a different `gl-*` surface, so re-run discovery there. `exec` has had no
-device test beyond its policy gate. Concurrency beyond one apply at a time is untested
+29 unit tests pass. They're mutation-checked: neutering `Authorise` fails 5, neutering
+`redact` fails 2, neutering the response pruner fails 2, and removing the pruner *call* from
+`ubus_call` fails 1 — that last test exists because an earlier version of the pruner had
+working unit tests while nothing asserted the tool actually used it.
+
+**Not verified:** that `keep.d` survives a real `sysupgrade` — the file is installed and
+correct, but no firmware flash was performed. Concurrency beyond one apply at a time
 (a second `uci_apply` is refused while one is pending).
+
+### Findings from the Flint 4 `gl-*` surface
+
+- **`gl-clients list` is enormous.** With 49 clients attached it returned 100,587 bytes —
+  60 samples of `last_rx` and 60 of `last_tx` per client. `ubus_call` now prunes arrays
+  over 16 elements out of the decoded reply, which brought that call to 43,676 bytes and
+  left it valid JSON. Still not small; the remaining bulk is one legitimate row per client.
+- **Do not grant `gl_screen.*`.** The Flint 4 has a 320x240 LCD and `gl_screen` accepts
+  `set`, but `ubus -v list` declares no argument schema and the validation all lives in the
+  oui-httpd Lua layer (`check_passcode`, `brightness_min/max`), which `ubus_call` bypasses.
+  Called directly, `{"method":"config_update","params":{"config":{"BRIGHTNESS":"40"}}}`
+  returns success and writes `BRIGHTNESS '"40"'` — the JSON quotes retained, the type
+  corrupted — into both `/tmp/gl_screen/active_config` and UCI, while `gl_screen -l` never
+  reflects the change. Other argument shapes are silently ignored. A useful screen tool
+  would have to reimplement the Lua layer's validation; the generic path is not safe here.
+- **`/tmp/gl_screen/active_config` holds the screen passcode in plaintext** (`PASSCODE
+  "1402"`). Any `exec` grant broad enough to read it exposes the device unlock code. The
+  auditor's `redact` covers the audit log, not tool output.
+- `sms_manager` exists but exposes exactly one ubus method, `set_sms_log_level`. There is no
+  send or read surface, and with no modem fitted (`cellular.modem status` → `{"modems": []}`)
+  nothing to wrap.
 
 **Known limitations**
 
@@ -184,8 +239,11 @@ device test beyond its policy gate. Concurrency beyond one apply at a time is un
   engine meaningful; an unscoped one reduces it to an audit trail.
 - Rate-limit windows are process-scoped, so a restart resets them — erring toward allowing
   what you already granted.
-- The binary doesn't survive a firmware upgrade (`/etc/config` does, `/usr/bin` doesn't).
-  Re-run `make install` afterwards until it's packaged as an `.ipk`/`.apk`.
+- Tool output is capped at 64 KB and long arrays in ubus replies at 16 elements. Both cuts
+  say so in the result, but a caller that needs a full time series has to reach for a
+  narrower ubus method.
+- Install with `make install-ipk`, not `make install`, if you want the daemon to survive a
+  firmware upgrade — only the packaged form ships the `keep.d` entry.
 
 ---
 

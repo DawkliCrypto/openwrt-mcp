@@ -6,7 +6,12 @@ ARCH   ?= arm64
 
 # OpenWrt's dropbear has no sftp-server, so modern scp (which defaults to SFTP)
 # fails with "Connection closed". Pipe over ssh instead.
-DEPLOY = ssh $(ROUTER) 'cat > $(1) && chmod +x $(1)'
+#
+# Write to a sidecar and rename: `cat >` onto a running binary fails with "Text file
+# busy" (ETXTBSY), which is every install after the first. rename(2) replaces the
+# directory entry and leaves the running process on the old inode, so the upgrade is
+# atomic and there is never a window with no binary on disk.
+DEPLOY = ssh $(ROUTER) 'cat > $(1).new && chmod +x $(1).new && mv $(1).new $(1)'
 
 test:
 	$(GO) vet ./... && $(GO) test ./...
@@ -24,7 +29,19 @@ install: build
 stage: build
 	$(call DEPLOY,/tmp/openwrt-mcp) < openwrt-mcp.$(ARCH)
 
-clean:
-	rm -f openwrt-mcp openwrt-mcp.*
+# Version comes from the binary, so the package can never claim a version it isn't.
+VERSION = $(shell sed -n 's/^var version = "\(.*\)"/\1/p' main.go)
 
-.PHONY: test build install stage clean
+ipk: build
+	./mkipk.sh openwrt-mcp.$(ARCH) $(VERSION) $(IPK_ARCH)
+
+# Unlike `install`, this survives a firmware upgrade: the package ships a
+# /lib/upgrade/keep.d entry, and opkg treats /etc/config as a conffile.
+install-ipk: ipk
+	ssh $(ROUTER) 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_$(VERSION)_$(or $(IPK_ARCH),aarch64_cortex-a53).ipk
+	ssh $(ROUTER) 'opkg install --force-reinstall /tmp/openwrt-mcp.ipk && rm -f /tmp/openwrt-mcp.ipk'
+
+clean:
+	rm -f openwrt-mcp openwrt-mcp.* *.ipk
+
+.PHONY: test build install stage ipk install-ipk clean
