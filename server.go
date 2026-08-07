@@ -93,7 +93,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", s.authenticate(mcp.NewStreamableHTTPHandler(s.getServer, nil)))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// AGPL-3.0 §13: this is a network service, so it offers its own source.
+		// Points at its own source. Under the AGPL this was a §13 obligation; under MIT
+		// it is only good manners, but a service that will tell you what it is and where
+		// it came from is worth keeping either way.
 		fmt.Fprintf(w, "openwrt-mcp %s ok\nsource: %s\n", version, sourceURL)
 	})
 	return mux

@@ -12,12 +12,9 @@ import (
 )
 
 // openwrt-mcp -- an MCP server hosted on an OpenWrt router.
-// Copyright (C) 2026 Ian Williams
+// Copyright (c) 2026 Ian Williams
 //
-// This program is free software: you can redistribute it and/or modify it under
-// the terms of the GNU Affero General Public License as published by the Free
-// Software Foundation, either version 3 of the License, or (at your option) any
-// later version. See the LICENSE file, or <https://www.gnu.org/licenses/>.
+// Released under the MIT Licence. See the LICENSE file.
 
 var version = "0.4.0"
 

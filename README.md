@@ -1,5 +1,9 @@
 # openwrt-mcp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/GlassOnTin/openwrt-mcp)](https://github.com/GlassOnTin/openwrt-mcp/releases)
+[![ko-fi](https://img.shields.io/badge/Ko--fi-support-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/glassontin)
+
 An MCP server that runs **on** an OpenWrt router, so Claude Code (or any MCP client) can
 inspect and change it over an SSH tunnel.
 
@@ -430,9 +434,12 @@ correct, but no firmware flash was performed. Concurrency beyond one apply at a 
 
 ## Licence
 
-Copyright (C) 2026 Ian Williams. Licensed under the **GNU Affero General Public License
-v3.0 or later** — see [LICENSE](LICENSE).
+Copyright (c) 2026 Ian Williams. **MIT** — see [LICENSE](LICENSE).
 
-AGPL because this is a network service: if you run a modified version where others can
-reach it, §13 requires you to offer them the source. The daemon does this for itself —
-`GET /health` returns its version and a link to this repository.
+MIT rather than a copyleft licence so that anyone, vendors included, can ship this in a
+firmware image without the licence being the reason not to. `GET /health` still returns the
+version and a link back here; that began as AGPL §13 compliance and stays because a service
+that says what it is and where it came from is useful regardless.
+
+If it saved you an afternoon, [Ko-fi](https://ko-fi.com/glassontin) is appreciated and never
+expected.
