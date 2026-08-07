@@ -21,6 +21,7 @@ type Server struct {
 	configPath string
 	statePath  string
 	audit      *Auditor
+	mfa        *MFAStore
 	tokens     *TokenStore
 
 	mu      sync.RWMutex
@@ -64,6 +65,10 @@ func NewServer(configPath, statePath string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	mfa, err := LoadMFA(path.Join(statePath, "mfa"))
+	if err != nil {
+		return nil, err
+	}
 	tokens, err := LoadTokens(path.Join(statePath, "tokens"))
 	if err != nil {
 		return nil, err
@@ -71,6 +76,7 @@ func NewServer(configPath, statePath string) (*Server, error) {
 	s := &Server{
 		configPath: configPath,
 		statePath:  statePath,
+		mfa:        mfa,
 		config:     cfg,
 		tokens:     tokens,
 		audit:      NewAuditor(cfg.AuditPath, cfg.AuditMaxMB),

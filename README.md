@@ -164,6 +164,51 @@ Nothing is granted by default. Start narrow: a refusal names the uncovered scope
 the exact `allow` line that would widen it, so it is cheap to loosen and expensive to notice
 you were too loose.
 
+### Optional: a second factor for the dangerous tools
+
+A broad grant plus a stolen bearer token is root on your router. The token is something your
+*workstation* has; a TOTP code is something *you* have, somewhere else. Enrol once and name
+the tools that should need it:
+
+```sh
+ssh root@192.168.8.1 'openwrt-mcp mfa enrol claude-code'   # prints a QR-scannable otpauth:// URI
+```
+
+```
+config policy
+	option client 'claude-code'
+	...
+	list   mfa_tools  'exec'
+	list   mfa_tools  'uci_apply'
+	option mfa_window '15m'
+```
+
+`list mfa_tools '*'` covers every tool the policy grants. Off unless you configure it, so
+existing setups are unchanged.
+
+One code then opens a **time-boxed window** rather than gating every call — an agent works in
+bursts, and a control that demands six digits per call gets switched off, which protects
+nothing. The agent calls `mfa_unlock` once, you read it a code, and it works normally until
+the window lapses:
+
+```
+exec {"argv":["uptime"]}
+  -> denied: exec requires a second factor for "claude-code"
+     call mfa_unlock with a current 6-digit code from your authenticator; it stays unlocked for 15m0s
+mfa_unlock {"code":"552575"}   -> Unlocked until 2026-08-07T07:39:48Z (15m0s).
+exec {"argv":["uptime"]}       -> 08:24:51 up 12:57, load average: 2.39 …
+mfa_unlock {"code":"552575"}   -> code already used
+```
+
+Codes are single-use, unlocks are per client and held in memory only, so a daemon restart
+re-locks everything. Standard RFC 6238 (SHA-1, 6 digits, 30s), checked against the RFC's own
+test vectors, so any authenticator app works.
+
+> Run `mfa enrol` yourself over SSH. The secret is printed once and is *recoverable* from
+> `/etc/openwrt-mcp/mfa` (mode 0600), unlike bearer tokens which are stored only as digests —
+> so anything that sees your terminal or that file can generate codes. Enrolling on someone
+> else's behalf, or pasting the secret into a chat, defeats the point of a second factor.
+
 ### 4. Connect over a tunnel
 
 The daemon refuses to bind anything but loopback, so reach it through SSH:
@@ -301,6 +346,7 @@ Both were the first choice; neither works for a resident daemon.
 | `uci_confirm` | *(tool-level)* | Cancels the rollback timer. |
 | `exec` | `argv[0]` | Direct exec, **no shell** — no pipes, globs or redirection, and no quoting surface. |
 | `logread` | *(tool-level)* | Split out from `exec` so logs can be granted without a root shell. |
+| `mfa_unlock` | *(ungated)* | Supplies a TOTP code to open the second-factor window. Ungated because it is how you satisfy the factor; it grants nothing without a valid current code. |
 
 ---
 

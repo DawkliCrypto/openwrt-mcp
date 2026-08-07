@@ -115,6 +115,11 @@ type Policy struct {
 	Expires   time.Time // zero == never expires
 	Enabled   bool
 
+	// MFATools names the granted tools that additionally require an unexpired TOTP unlock.
+	// Empty == no second factor, which is the default and keeps older configs unchanged.
+	MFATools  []string
+	MFAWindow time.Duration
+
 	mu   sync.Mutex
 	hits []time.Time // rolling 60s window; process-scoped by design (see README)
 }
@@ -199,7 +204,35 @@ func policyFromSection(s uciSection) (*Policy, error) {
 		}
 		p.Expires = t
 	}
+
+	// Optional second factor. Absent means off, so every existing config keeps working
+	// exactly as before -- this can only ever take permission away, never add it.
+	p.MFATools = s.Lists["mfa_tools"]
+	if v := s.Options["mfa_tools"]; v != "" {
+		p.MFATools = append(p.MFATools, strings.Fields(v)...)
+	}
+	for _, t := range p.MFATools {
+		if !contains(p.Tools, t) && t != "*" {
+			return nil, fmt.Errorf("mfa_tools names %q, which this policy does not grant", t)
+		}
+	}
+	w, err := parseMFAWindow(s.Options["mfa_window"])
+	if err != nil {
+		return nil, fmt.Errorf("bad 'mfa_window': %w", err)
+	}
+	p.MFAWindow = w
 	return p, nil
+}
+
+// NeedsMFA reports whether this policy requires a second factor for the named tool.
+// "*" in mfa_tools covers every tool the policy grants.
+func (p *Policy) NeedsMFA(tool string) bool {
+	for _, t := range p.MFATools {
+		if t == "*" || t == tool {
+			return true
+		}
+	}
+	return false
 }
 
 // Authorise reports whether any single policy permits client/tool and covers *every*
@@ -210,6 +243,14 @@ func policyFromSection(s uciSection) (*Policy, error) {
 //
 // One rate token is consumed per authorised call, not per scope.
 func (c *Config) Authorise(client, tool string, scopes []string, now time.Time) (bool, string) {
+	p, reason := c.AuthorisePolicy(client, tool, scopes, now)
+	return p != nil, reason
+}
+
+// AuthorisePolicy is Authorise plus the policy that granted the call, which the caller needs
+// to know whether that grant additionally demands a second factor. Authorise remains as the
+// boolean form because most callers only ask "may I".
+func (c *Config) AuthorisePolicy(client, tool string, scopes []string, now time.Time) (*Policy, string) {
 	var sawClientTool bool
 	var uncovered string
 	for _, p := range c.Policies {
@@ -225,15 +266,15 @@ func (c *Config) Authorise(client, tool string, scopes []string, now time.Time) 
 			continue
 		}
 		if !p.takeToken(now) {
-			return false, fmt.Sprintf("rate limit: policy for %q allows %d calls/min to %s", client, p.MaxPerMin, tool)
+			return nil, fmt.Sprintf("rate limit: policy for %q allows %d calls/min to %s", client, p.MaxPerMin, tool)
 		}
-		return true, ""
+		return p, ""
 	}
 	if sawClientTool && uncovered != "" {
-		return false, fmt.Sprintf("denied: %s is granted to %q but no policy scope covers %q\n"+
+		return nil, fmt.Sprintf("denied: %s is granted to %q but no policy scope covers %q\n"+
 			"  grant it: openwrt-mcp allow %s %s '%s' 60m", tool, client, uncovered, client, tool, uncovered)
 	}
-	return false, fmt.Sprintf("denied: no policy grants %s to %q\n"+
+	return nil, fmt.Sprintf("denied: no policy grants %s to %q\n"+
 		"  grant it: openwrt-mcp allow %s %s '%s' 60m", tool, client, client, tool, orStar(strings.Join(scopes, " ")))
 }
 

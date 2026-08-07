@@ -97,6 +97,21 @@ func (p *pruner) walk(v any) any {
 	return v
 }
 
+// mfaGate returns a refusal, or "" if the call may proceed. Named rather than inlined in the
+// tool wrapper so a test can drive it: a second factor that is never actually consulted is
+// exactly the kind of control that looks present and protects nothing.
+func (s *Server) mfaGate(p *Policy, client, tool string, now time.Time) string {
+	if p == nil || !p.NeedsMFA(tool) {
+		return ""
+	}
+	if _, open := s.mfa.UnlockedUntil(client, now); open {
+		return ""
+	}
+	return fmt.Sprintf("denied: %s requires a second factor for %q\n"+
+		"  call mfa_unlock with a current 6-digit code from your authenticator; "+
+		"it stays unlocked for %s", tool, client, p.MFAWindow)
+}
+
 // uciScopes derives the policy scopes for an apply. Named rather than inlined so a test can
 // pin the section-level form: a scope of "dhcp.pi" (create the section) is a different
 // permission from "dhcp.pi.ip" (set an option in it), and a policy must cover each on its
@@ -208,6 +223,10 @@ type execIn struct {
 	Timeout int      `json:"timeout,omitempty" jsonschema:"seconds before the command is killed (default 30, max 300)"`
 }
 
+type mfaUnlockIn struct {
+	Code string `json:"code" jsonschema:"the current 6-digit code from the operator's authenticator app"`
+}
+
 type logreadIn struct {
 	Lines   int    `json:"lines,omitempty" jsonschema:"how many recent lines to return (default 100, max 2000)"`
 	Pattern string `json:"pattern,omitempty" jsonschema:"only return lines containing this substring"`
@@ -286,6 +305,33 @@ func (s *Server) newServerForClient(client string) *mcp.Server {
 			return out, strings.Join(in.Argv, " "), err
 		})
 
+	addTool(s, srv, client, "mfa_unlock",
+		"Supply a 6-digit TOTP code to unlock the tools this client's policy marks as needing "+
+			"a second factor. One code opens a time-boxed window rather than gating every call, "+
+			"so ask the operator for a code once and work normally until it expires. Codes are "+
+			"single-use. Does nothing unless the operator has enrolled a secret with "+
+			"'openwrt-mcp mfa enrol'.",
+		func(in mfaUnlockIn) []string { return nil },
+		func(ctx context.Context, in mfaUnlockIn) (string, string, error) {
+			now := time.Now()
+			window := defaultMFAWindow
+			// Use the window from any policy that names this client, so a policy saying
+			// 5m is not silently stretched to the default.
+			for _, p := range s.cfg().Policies {
+				if p.Client == client && p.Enabled && len(p.MFATools) > 0 {
+					window = p.MFAWindow
+					break
+				}
+			}
+			until, err := s.mfa.Unlock(client, in.Code, window, now)
+			if err != nil {
+				// Returned as an error so it audits as ERROR, distinct from a policy DENIED.
+				return "", "mfa_unlock", err
+			}
+			return fmt.Sprintf("Unlocked until %s (%s).", until.Format(time.RFC3339), window),
+				"mfa_unlock", nil
+		})
+
 	addTool(s, srv, client, "logread",
 		"Read the router's system log. Separate from exec so a policy can grant log access without "+
 			"granting a root shell.",
@@ -353,9 +399,21 @@ func addTool[In any](s *Server, srv *mcp.Server, client, name, desc string,
 
 			// ubus_list is introspection only and is never gated; everything else must be
 			// covered by a standing policy. Denial is the default.
-			if name != "ubus_list" {
-				if ok, reason := s.cfg().Authorise(client, name, scopes, time.Now()); !ok {
+			//
+			// mfa_unlock is exempt for the obvious reason: it is how you satisfy the second
+			// factor, so gating it behind the second factor would be a deadlock. It is safe
+			// to leave open because it grants nothing on its own -- without a valid current
+			// code it does nothing but record a failed attempt.
+			if name != "ubus_list" && name != "mfa_unlock" {
+				now := time.Now()
+				p, reason := s.cfg().AuthorisePolicy(client, name, scopes, now)
+				if p == nil {
 					return finish(errResult(reason), OutcomeDenied, "", reason)
+				}
+				// Second factor, checked after authorisation so an unauthorised caller
+				// learns nothing about which tools are MFA-gated.
+				if r := s.mfaGate(p, client, name, now); r != "" {
+					return finish(errResult(r), OutcomeDenied, "", r)
 				}
 			}
 
