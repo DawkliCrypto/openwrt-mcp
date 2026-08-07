@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.4.0
+
+**An optional TOTP second factor for the tools that can change or read anything.** Opt-in per
+policy — absent means off, so every existing configuration behaves exactly as before.
+
+### Added
+
+- `mfa_tools` and `mfa_window` on a policy. Naming a tool there additionally requires an
+  unexpired TOTP unlock; `'*'` covers every tool the policy grants.
+- `openwrt-mcp mfa enrol <client>` prints a QR-scannable `otpauth://` URI once, and
+  `openwrt-mcp mfa status` shows who is enrolled and what is gated.
+- An `mfa_unlock` tool taking a 6-digit code.
+
+### Why a window rather than a code per call
+
+A broad grant plus a stolen bearer token is root on the router. The token is something the
+workstation has; a TOTP code is something the operator has, elsewhere.
+
+But an agent works in bursts, and a control that demands six digits per call gets switched
+off — a control too annoying to leave on protects nothing. So one code opens a time-boxed
+window and the gated tools work normally until it lapses, the way `sudo` does.
+
+### Decisions worth knowing
+
+- `mfa_unlock` is itself ungated, or satisfying the factor would deadlock behind the factor.
+  Safe because it grants nothing without a valid current code.
+- The check runs **after** authorisation, so an unauthorised caller learns nothing about which
+  tools are gated.
+- Unenrolled and wrong-code fail with identical text; distinguishing them tells an attacker
+  which clients are worth attacking.
+- Codes are single-use. Without that a code is good for its whole ~90-second acceptance span.
+- Unlocks live in memory only, so a restart re-locks everything.
+- `mfa_tools` naming a tool the policy does not grant is rejected at load — a typo would
+  otherwise sit there looking like protection.
+- The secret is stored recoverably, because TOTP is symmetric, unlike bearer tokens which are
+  kept only as digests. Hence mode 0600, and `enrol` is CLI-only. **Run it yourself**: a
+  secret that passes through anyone else is not a second factor.
+
+### Verified
+
+End to end on hardware: `exec` denied, a real code unlocked for 15m, `exec` worked, the same
+code was refused as replayed, and `ubus_call` — not listed in `mfa_tools` — was unaffected
+throughout.
+
+73 tests. TOTP is checked against RFC 6238's own vectors, because a hand-rolled
+implementation that is subtly wrong still agrees with itself: enrolment and unlock would
+match while no real authenticator app could produce an accepted code. Eight mutations all
+killed, including gate-always-allows, accepts-any-code, replay-removed, window-never-expires
+and 0600→0644.
+
 ## v0.3.2
 
 **Fixes a bug that hid the status page on any router not in "router" net mode.** Worth
