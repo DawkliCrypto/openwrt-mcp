@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.3.0
+
+A status page inside the router's own web UI, under **Applications → MCP Server**: daemon
+state, paired clients, standing policies and the recent audit tail. Read-only.
+
+### Added
+
+- `openwrt-mcp status [--json] [--audit N]` — daemon state, pairings, grants and recent
+  audit entries. `--json` is what the web UI consumes.
+- An oui-httpd RPC module at `/usr/lib/oui-httpd/rpc/openwrt-mcp` exposing
+  `openwrt-mcp.status`, plus the view and menu entry the GL.iNet SPA loads.
+
+### Why the UI is read-only
+
+`pair`, `allow` and `unpair` stay command-line only, so nothing reachable over the network
+can widen a grant — the same property that keeps them out of the MCP tool list. The page
+shows and explains grants; it never issues them.
+
+Status is a CLI subcommand rather than a second HTTP endpoint for the same reason. The
+daemon's only listener is loopback and reachability is explicitly not treated as identity,
+so a second HTTP surface would mean either exposing policy and audit data to every process
+on the router, or storing a bearer token on the router for the UI to present. oui-httpd
+already runs as root and can read the state directory anyway, so a CLI read grants its
+caller nothing new.
+
+### Notes for anyone building a GL.iNet view
+
+No GL.iNet SDK or bundler is needed. The SPA fetches a view as text, `eval`s it, and uses
+the resulting value as the route component, so a plain IIFE returning a Vue 2 options object
+is sufficient. The shipped views' `module.exports=…` form works only because a direct `eval`
+inherits the enclosing webpack wrapper's scope. Vue is 2.6.12, so render functions avoid
+needing a template compiler at eval time.
+
+`running` in the report asks `/health` and requires the daemon to identify itself, rather
+than just dialling the port — 8730 is an ordinary port for something else to hold, and an
+`ssh -L` answers it happily.
+
 ## v0.2.0
 
 First release with a downloadable package. The `.ipk` on the release page installs without a

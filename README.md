@@ -123,7 +123,7 @@ Download `openwrt-mcp_*.ipk` from [Releases](https://github.com/GlassOnTin/openw
 and push it over — no toolchain needed:
 
 ```sh
-ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_0.2.0_aarch64_cortex-a53.ipk
+ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_0.3.0_aarch64_cortex-a53.ipk
 ssh root@192.168.8.1 'opkg install /tmp/openwrt-mcp.ipk && rm -f /tmp/openwrt-mcp.ipk'
 ```
 
@@ -211,6 +211,32 @@ real time, both verified on opkg 1bf042dd (2021-06-13):
 The package also ships `/lib/upgrade/keep.d/openwrt-mcp`, which is how the binary, the init
 script and the token store survive `sysupgrade`. GL.iNet's own packages use the same
 mechanism.
+
+---
+
+## The router's own web UI
+
+On GL.iNet firmware the package adds a page under **Applications → MCP Server**: whether the
+daemon is running, which clients are paired, what each is granted, and the recent audit tail.
+
+It is **read-only**. `pair`, `allow` and `unpair` stay command-line only, so nothing
+reachable over the network can widen a grant — the same reason they are not MCP tools. The
+page explains grants; it never issues them.
+
+The data comes from `openwrt-mcp status --json` via an oui-httpd RPC module
+(`openwrt-mcp.status`). Status is a CLI subcommand rather than a second HTTP endpoint on
+purpose: the daemon's only listener is loopback and reachability is not treated as identity,
+so another HTTP surface would mean either exposing policy and audit data to every process on
+the router, or keeping a bearer token on the router for the UI to present. oui-httpd already
+runs as root and can read the state directory, so a CLI read grants its caller nothing new.
+
+On stock OpenWrt the two extra files are inert — nothing reads them — so it stays one package.
+
+> Building a view for this UI needs no GL.iNet SDK and no bundler. The SPA fetches the file
+> as text, `eval`s it, and uses the resulting value as the route component, so a plain IIFE
+> returning a Vue 2 options object is enough. The shipped `module.exports=…` bundles work only
+> because a direct `eval` inherits the enclosing webpack wrapper's scope. Vue is 2.6.12, so
+> render functions avoid needing a template compiler at eval time. See `ui/view.js`.
 
 ---
 

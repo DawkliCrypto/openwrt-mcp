@@ -19,7 +19,7 @@ import (
 // Software Foundation, either version 3 of the License, or (at your option) any
 // later version. See the LICENSE file, or <https://www.gnu.org/licenses/>.
 
-var version = "0.2.0"
+var version = "0.3.0"
 
 const sourceURL = "https://github.com/GlassOnTin/openwrt-mcp"
 
