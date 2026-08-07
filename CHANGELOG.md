@@ -54,11 +54,11 @@ End to end on hardware: `exec` denied, a real code unlocked for 15m, `exec` work
 code was refused as replayed, and `ubus_call` — not listed in `mfa_tools` — was unaffected
 throughout.
 
-73 tests. TOTP is checked against RFC 6238's own vectors, because a hand-rolled
+76 tests. TOTP is checked against RFC 6238's own vectors, because a hand-rolled
 implementation that is subtly wrong still agrees with itself: enrolment and unlock would
-match while no real authenticator app could produce an accepted code. Eight mutations all
-killed, including gate-always-allows, accepts-any-code, replay-removed, window-never-expires
-and 0600→0644.
+match while no real authenticator app could produce an accepted code. Nine mutations all
+killed, including gate-always-allows, accepts-any-code, replay-removed, window-never-expires,
+reload-removed and 0600→0644.
 
 ## v0.3.2
 
