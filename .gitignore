@@ -4,3 +4,9 @@
 /openwrt-mcp
 /openwrt-mcp.*
 /*.ipk
+
+# docs/screenshot.js needs puppeteer-core; it is a tool for regenerating an image, not a
+# dependency of the daemon, so it is installed on demand rather than declared.
+/node_modules
+/package-lock.json
+/package.json
