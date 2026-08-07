@@ -4,9 +4,9 @@ An MCP server that runs **on** an OpenWrt router, so Claude Code (or any MCP cli
 inspect and change it over an SSH tunnel.
 
 Developed against **GL.iNet** routers — verified on a Flint 2, a Flint 4 (GL-BE14000,
-firmware 4.9.0) and a Flint 3 (GL-BE10000, firmware 4.8.4, in AP mode). GL.iNet firmware 4.x
-is OpenWrt 21.02 with `opkg`, which is what the `.ipk` targets. It should suit any
-`opkg`-based OpenWrt; stock OpenWrt 24.10+ moved to `apk` and is **untested**.
+firmware 4.9.0, router mode) and a Slate 7 Pro (GL-BE10000, firmware 4.8.4, AP mode).
+GL.iNet firmware 4.x is OpenWrt 21.02 with `opkg`, which is what the `.ipk` targets. It
+should suit any `opkg`-based OpenWrt; stock OpenWrt 24.10+ moved to `apk` and is **untested**.
 
 The other OpenWrt MCP servers I could find run *off*-router — they SSH in from your
 workstation on every call. This one is resident: a single static Go binary under procd,
