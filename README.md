@@ -18,11 +18,16 @@ that goes stale with each firmware update. On a GL.iNet box that means the vendo
 `gl-*` objects come through without a line of code per feature.
 
 ![The MCP Server page in GL.iNet's admin panel: daemon status, paired clients, standing
-policies and the recent audit tail](docs/router-ui.png)
+policies and the recent audit tail, including a refused call](docs/router-ui.png)
 
 On GL.iNet firmware it adds a read-only page to the router's own admin panel, under
 **Applications → MCP Server** — what is running, who is paired, what they may do, and what
 they have been doing. Granting stays on the command line.
+
+The refusal in that audit tail is the security model working, not a fault: `ubus_call` was
+granted on `network.*`, `iwinfo.*`, `system.*` and `gl-clients.*`, so `dnsmasq.metrics` was
+denied — and the denial names the uncovered scope and prints the `allow` line that would
+cover it. Starting narrow costs little when widening is one command away.
 
 ---
 
