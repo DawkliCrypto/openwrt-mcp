@@ -174,6 +174,11 @@ the tools that should need it:
 ssh root@192.168.8.1 'openwrt-mcp mfa enrol claude-code'   # prints a QR-scannable otpauth:// URI
 ```
 
+The router names itself in the account, so an authenticator holding secrets for several
+routers can tell them apart — `claude-code@GL-BE14000` rather than a second identical
+`claude-code`. It defaults to the hostname; pass a label to override:
+`mfa enrol claude-code upstairs`.
+
 ```
 config policy
 	option client 'claude-code'

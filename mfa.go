@@ -50,25 +50,49 @@ type MFAStore struct {
 	path string
 
 	mu      sync.Mutex
+	mtime   time.Time            // of path, to notice enrolments by the CLI
 	secrets map[string]string    // client -> base32 secret
 	unlocks map[string]time.Time // client -> unlocked until
 	lastCtr map[string]uint64    // client -> last accepted time-step, for replay
 }
 
-func LoadMFA(path string) (*MFAStore, error) {
-	m := &MFAStore{
-		path:    path,
-		secrets: map[string]string{},
-		unlocks: map[string]time.Time{},
-		lastCtr: map[string]uint64{},
+// reloadLocked re-reads the secret file when it has changed on disk. Callers hold m.mu.
+//
+// `openwrt-mcp mfa enrol` is a separate process writing that file, so without this a running
+// daemon keeps the secrets it loaded at startup and rejects every code from a freshly
+// enrolled client as "invalid" -- with no hint that a restart is what it wants. `allow`
+// already takes effect on a running daemon; enrolment has to behave the same way.
+//
+// Unlocks and replay counters are runtime state and survive a reload, except for a client
+// whose secret actually changed: rotating a secret is what you do when it may be compromised,
+// so any window opened under the old one must close.
+func (m *MFAStore) reloadLocked() {
+	st, err := os.Stat(m.path)
+	if err != nil {
+		return // no file yet, or unreadable: keep what we have
 	}
+	if st.ModTime().Equal(m.mtime) {
+		return
+	}
+	fresh, err := parseMFAFile(m.path)
+	if err != nil {
+		return // a half-written file must not wipe working secrets
+	}
+	for client, old := range m.secrets {
+		if fresh[client] != old {
+			delete(m.unlocks, client)
+			delete(m.lastCtr, client)
+		}
+	}
+	m.secrets, m.mtime = fresh, st.ModTime()
+}
+
+func parseMFAFile(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return m, nil // no enrolments == no MFA == every policy unaffected. Valid state.
-		}
 		return nil, err
 	}
+	out := map[string]string{}
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -78,15 +102,57 @@ func LoadMFA(path string) (*MFAStore, error) {
 		if !ok {
 			continue
 		}
-		m.secrets[client] = strings.TrimSpace(secret)
+		out[client] = strings.TrimSpace(secret)
+	}
+	return out, nil
+}
+
+func LoadMFA(path string) (*MFAStore, error) {
+	m := &MFAStore{
+		path:    path,
+		secrets: map[string]string{},
+		unlocks: map[string]time.Time{},
+		lastCtr: map[string]uint64{},
+	}
+	fresh, err := parseMFAFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return m, nil // no enrolments == no MFA == every policy unaffected. Valid state.
+		}
+		return nil, err
+	}
+	m.secrets = fresh
+	if st, err := os.Stat(path); err == nil {
+		m.mtime = st.ModTime()
 	}
 	return m, nil
+}
+
+// deviceLabel names the router in the otpauth account, so an authenticator holding secrets
+// for several routers can tell them apart.
+//
+// Without it every enrolment shows up as the same "openwrt-mcp (claude-code)" and you are
+// left guessing which entry belongs to which box -- which is exactly what happened with two
+// routers: the entries were indistinguishable and the only way to pair them up was trying
+// each code against each router.
+func deviceLabel() string {
+	if h, err := os.Hostname(); err == nil && h != "" && h != "(none)" {
+		return h
+	}
+	if b, err := os.ReadFile("/proc/sys/kernel/hostname"); err == nil {
+		if h := strings.TrimSpace(string(b)); h != "" {
+			return h
+		}
+	}
+	return ""
 }
 
 // Enrol mints a new secret for a client, replacing any existing one. Returns the secret and
 // an otpauth:// URI for a QR code. Re-enrolling invalidates the old secret, which is the
 // recovery path when a phone is lost.
-func (m *MFAStore) Enrol(client, issuer string) (secret, uri string, err error) {
+//
+// device names the router in the account label; empty falls back to the hostname.
+func (m *MFAStore) Enrol(client, issuer, device string) (secret, uri string, err error) {
 	buf := make([]byte, 20) // 160 bits, per RFC 4226 section 4
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", err
@@ -107,7 +173,16 @@ func (m *MFAStore) Enrol(client, issuer string) (secret, uri string, err error) 
 		return "", "", err
 	}
 
-	label := url.PathEscape(issuer + ":" + client)
+	// otpauth label is "Issuer:AccountName". The router goes in the account, so apps show
+	// e.g. "openwrt-mcp (claude-code@GL-BE14000)" and two routers never collide.
+	account := client
+	if device == "" {
+		device = deviceLabel()
+	}
+	if device != "" {
+		account = client + "@" + device
+	}
+	label := url.PathEscape(issuer + ":" + account)
 	uri = fmt.Sprintf("otpauth://totp/%s?secret=%s&issuer=%s&algorithm=SHA1&digits=%d&period=%d",
 		label, secret, url.QueryEscape(issuer), totpDigits, int(totpStep.Seconds()))
 	return secret, uri, nil
@@ -139,6 +214,7 @@ func (m *MFAStore) save(secrets map[string]string) error {
 func (m *MFAStore) Enrolled(client string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.reloadLocked()
 	return m.secrets[client] != ""
 }
 
@@ -159,6 +235,7 @@ func (m *MFAStore) Clients() []string {
 func (m *MFAStore) Unlock(client, code string, window time.Duration, now time.Time) (time.Time, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.reloadLocked()
 
 	secret := m.secrets[client]
 	code = strings.TrimSpace(code)

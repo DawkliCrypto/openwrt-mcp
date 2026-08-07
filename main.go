@@ -123,10 +123,15 @@ func main() {
 		}
 		switch sub {
 		case "enrol", "enroll":
-			if len(args) != 3 {
-				die("usage: openwrt-mcp mfa enrol <client>")
+			if len(args) < 3 || len(args) > 4 {
+				die("usage: openwrt-mcp mfa enrol <client> [device-label]\n" +
+					"  the label names this router in your authenticator; defaults to the hostname")
 			}
-			secret, uri, err := ms.Enrol(args[2], "openwrt-mcp")
+			device := ""
+			if len(args) == 4 {
+				device = args[3]
+			}
+			secret, uri, err := ms.Enrol(args[2], "openwrt-mcp", device)
 			must(err)
 			// Printed once, like a pairing token -- but unlike one this IS recoverable from
 			// the state file, so say plainly that the file is credential material.
@@ -243,7 +248,7 @@ func usage() {
   revoke                                      (edit %s and restart)
   policies                                    show current grants
   status   [--json] [--audit N]                daemon state, pairings, grants, recent audit
-  mfa      enrol <client> | status           optional TOTP second factor for gated tools
+  mfa      enrol <client> [device] | status   optional TOTP second factor for gated tools
   version
 
 Reach it from a workstation with:

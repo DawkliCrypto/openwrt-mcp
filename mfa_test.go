@@ -60,7 +60,7 @@ func codeNow(t *testing.T, m *MFAStore, client string, now time.Time) string {
 
 func TestUnlockAcceptsAValidCodeAndOpensAWindow(t *testing.T) {
 	m, _ := newMFA(t)
-	if _, _, err := m.Enrol("a", "openwrt-mcp"); err != nil {
+	if _, _, err := m.Enrol("a", "openwrt-mcp", "testrouter"); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(1700000000, 0)
@@ -82,7 +82,7 @@ func TestUnlockAcceptsAValidCodeAndOpensAWindow(t *testing.T) {
 
 func TestUnlockRejectsWrongCode(t *testing.T) {
 	m, _ := newMFA(t)
-	m.Enrol("a", "openwrt-mcp")
+	m.Enrol("a", "openwrt-mcp", "testrouter")
 	now := time.Unix(1700000000, 0)
 
 	for _, bad := range []string{"000000", "12345", "1234567", "", "abcdef"} {
@@ -99,7 +99,7 @@ func TestUnlockRejectsWrongCode(t *testing.T) {
 // one shoulder-surf or one code left in a scrollback is reusable.
 func TestUnlockRefusesAReplayedCode(t *testing.T) {
 	m, _ := newMFA(t)
-	m.Enrol("a", "openwrt-mcp")
+	m.Enrol("a", "openwrt-mcp", "testrouter")
 	now := time.Unix(1700000000, 0)
 	code := codeNow(t, m, "a", now)
 
@@ -116,7 +116,7 @@ func TestUnlockRefusesAReplayedCode(t *testing.T) {
 // attacker which clients are worth attacking.
 func TestUnlockUnenrolledIsIndistinguishableFromWrongCode(t *testing.T) {
 	m, _ := newMFA(t)
-	m.Enrol("enrolled", "openwrt-mcp")
+	m.Enrol("enrolled", "openwrt-mcp", "testrouter")
 	now := time.Unix(1700000000, 0)
 
 	_, errUnenrolled := m.Unlock("stranger", "123456", time.Minute, now)
@@ -131,7 +131,7 @@ func TestUnlockUnenrolledIsIndistinguishableFromWrongCode(t *testing.T) {
 
 func TestEnrolPersistsAndRotates(t *testing.T) {
 	m, dir := newMFA(t)
-	s1, uri, err := m.Enrol("a", "openwrt-mcp")
+	s1, uri, err := m.Enrol("a", "openwrt-mcp", "testrouter")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestEnrolPersistsAndRotates(t *testing.T) {
 	// Re-enrolling is the lost-phone path: the old secret must stop working.
 	now := time.Unix(1700000000, 0)
 	oldCode, _ := totpAt(s1, uint64(now.Unix())/30)
-	s2, _, _ := m.Enrol("a", "openwrt-mcp")
+	s2, _, _ := m.Enrol("a", "openwrt-mcp", "testrouter")
 	if s1 == s2 {
 		t.Fatal("re-enrolment reused the secret")
 	}
@@ -170,12 +170,12 @@ func TestEnrolPersistsAndRotates(t *testing.T) {
 
 func TestEnrolClearsAnExistingUnlock(t *testing.T) {
 	m, _ := newMFA(t)
-	m.Enrol("a", "openwrt-mcp")
+	m.Enrol("a", "openwrt-mcp", "testrouter")
 	now := time.Unix(1700000000, 0)
 	if _, err := m.Unlock("a", codeNow(t, m, "a", now), time.Hour, now); err != nil {
 		t.Fatal(err)
 	}
-	m.Enrol("a", "openwrt-mcp") // e.g. rotating after a suspected compromise
+	m.Enrol("a", "openwrt-mcp", "testrouter") // e.g. rotating after a suspected compromise
 	if _, open := m.UnlockedUntil("a", now); open {
 		t.Error("re-enrolment left the old unlock open")
 	}
@@ -256,7 +256,7 @@ func TestPolicyMFAStarCoversEveryTool(t *testing.T) {
 // that they are joined up, which is the failure mode that leaves a control looking present.
 func TestMFAGate(t *testing.T) {
 	m, dir := newMFA(t)
-	m.Enrol("a", "openwrt-mcp")
+	m.Enrol("a", "openwrt-mcp", "testrouter")
 	s := &Server{statePath: dir, mfa: m}
 	now := time.Unix(1700000000, 0)
 
@@ -294,8 +294,8 @@ func TestMFAGate(t *testing.T) {
 // One client's unlock must not open another's.
 func TestMFAUnlockIsPerClient(t *testing.T) {
 	m, dir := newMFA(t)
-	m.Enrol("a", "openwrt-mcp")
-	m.Enrol("b", "openwrt-mcp")
+	m.Enrol("a", "openwrt-mcp", "testrouter")
+	m.Enrol("b", "openwrt-mcp", "testrouter")
 	s := &Server{statePath: dir, mfa: m}
 	now := time.Unix(1700000000, 0)
 	gated := &Policy{Tools: []string{"exec"}, MFATools: []string{"exec"},
@@ -307,5 +307,102 @@ func TestMFAUnlockIsPerClient(t *testing.T) {
 	}
 	if r := s.mfaGate(gated, "b", "exec", now); r == "" {
 		t.Error("b was unlocked by a's code")
+	}
+}
+
+// Regression: `openwrt-mcp mfa enrol` is a separate process writing the secret file. A
+// running daemon that only read it at startup rejects every code from a freshly enrolled
+// client as "invalid code" -- which is what happened on a real router, with no hint that a
+// restart was what it wanted.
+func TestUnlockSeesAnEnrolmentByAnotherProcess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mfa")
+
+	daemon, err := LoadMFA(path) // started before anything was enrolled
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1700000000, 0)
+	if _, err := daemon.Unlock("a", "123456", time.Minute, now); err == nil {
+		t.Fatal("unlocked with no enrolment at all")
+	}
+
+	// A different process enrols, exactly as the CLI does.
+	cli, err := LoadMFA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := cli.Enrol("a", "openwrt-mcp", "testrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// mtime granularity: make sure the change is observable.
+	os.Chtimes(path, now.Add(time.Hour), now.Add(time.Hour))
+
+	code, _ := totpAt(secret, uint64(now.Unix())/30)
+	if _, err := daemon.Unlock("a", code, time.Minute, now); err != nil {
+		t.Fatalf("the running daemon did not pick up the new enrolment: %v", err)
+	}
+	if !daemon.Enrolled("a") {
+		t.Error("Enrolled() still reports the stale view")
+	}
+}
+
+// Rotating a secret is what you do when it might be compromised, so a window opened under
+// the old one must not survive the reload.
+func TestReloadClosesAWindowWhenTheSecretRotates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mfa")
+	daemon, _ := LoadMFA(path)
+	cli, _ := LoadMFA(path)
+
+	s1, _, _ := cli.Enrol("a", "openwrt-mcp", "testrouter")
+	now := time.Unix(1700000000, 0)
+	os.Chtimes(path, now, now)
+	c1, _ := totpAt(s1, uint64(now.Unix())/30)
+	if _, err := daemon.Unlock("a", c1, time.Hour, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, open := daemon.UnlockedUntil("a", now); !open {
+		t.Fatal("should be unlocked")
+	}
+
+	cli.Enrol("a", "openwrt-mcp", "testrouter") // rotate
+	os.Chtimes(path, now.Add(time.Hour), now.Add(time.Hour))
+	daemon.Unlock("a", "000000", time.Minute, now) // any call triggers the reload
+	if _, open := daemon.UnlockedUntil("a", now); open {
+		t.Error("the window survived a secret rotation")
+	}
+}
+
+// Two routers must not produce indistinguishable entries in an authenticator app.
+func TestEnrolLabelsTheDevice(t *testing.T) {
+	m, _ := newMFA(t)
+	_, uri, err := m.Enrol("claude-code", "openwrt-mcp", "GL-BE14000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(uri, "claude-code@GL-BE14000") {
+		t.Errorf("account label does not name the router: %q", uri)
+	}
+
+	// A second router with the same client must differ, or you cannot tell them apart.
+	m2, _ := newMFA(t)
+	_, uri2, _ := m2.Enrol("claude-code", "openwrt-mcp", "GL-BE10000")
+	if uri == uri2 {
+		t.Fatal("two routers produced identical labels")
+	}
+	if !strings.Contains(uri2, "claude-code@GL-BE10000") {
+		t.Errorf("second label wrong: %q", uri2)
+	}
+
+	// No label available: fall back to the bare client rather than a stray '@'.
+	m3, _ := newMFA(t)
+	_, uri3, _ := m3.Enrol("claude-code", "openwrt-mcp", "")
+	if strings.Contains(uri3, "@") && strings.Contains(uri3, "claude-code@?") {
+		t.Errorf("malformed fallback label: %q", uri3)
+	}
+	if !strings.Contains(uri3, "claude-code") {
+		t.Errorf("client name missing: %q", uri3)
 	}
 }

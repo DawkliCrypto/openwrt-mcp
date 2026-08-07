@@ -38,6 +38,16 @@ window and the gated tools work normally until it lapses, the way `sudo` does.
   kept only as digests. Hence mode 0600, and `enrol` is CLI-only. **Run it yourself**: a
   secret that passes through anyone else is not a second factor.
 
+### Fixed before release
+
+- A freshly enrolled client was rejected with "invalid code" on a **running** daemon. The
+  secret file was read once at startup, and `mfa enrol` is a separate process writing it, so
+  enrolment silently needed a restart. It now reloads on change, the way `allow` already did.
+  Rotating a secret closes any window opened under the old one.
+- The `otpauth://` account now names the router (`claude-code@GL-BE14000`). Without it, two
+  routers produce identical authenticator entries and the only way to pair them up is trying
+  each code against each router — which is precisely how this was found.
+
 ### Verified
 
 End to end on hardware: `exec` denied, a real code unlocked for 15m, `exec` worked, the same
