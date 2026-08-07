@@ -17,6 +17,13 @@ box, so the agent discovers what your router can actually do instead of trusting
 that goes stale with each firmware update. On a GL.iNet box that means the vendor's own
 `gl-*` objects come through without a line of code per feature.
 
+![The MCP Server page in GL.iNet's admin panel: daemon status, paired clients, standing
+policies and the recent audit tail](docs/router-ui.png)
+
+On GL.iNet firmware it adds a read-only page to the router's own admin panel, under
+**Applications → MCP Server** — what is running, who is paired, what they may do, and what
+they have been doing. Granting stays on the command line.
+
 ---
 
 ## Use cases
