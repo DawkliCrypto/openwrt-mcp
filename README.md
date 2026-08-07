@@ -135,7 +135,7 @@ Download `openwrt-mcp_*.ipk` from [Releases](https://github.com/GlassOnTin/openw
 and push it over — no toolchain needed:
 
 ```sh
-ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_0.3.0_aarch64_cortex-a53.ipk
+ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_0.3.1_aarch64_cortex-a53.ipk
 ssh root@192.168.8.1 'opkg install /tmp/openwrt-mcp.ipk && rm -f /tmp/openwrt-mcp.ipk'
 ```
 

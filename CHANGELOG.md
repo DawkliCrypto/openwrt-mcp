@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.1
+
+Documentation only — **no functional change from v0.3.0**, so there is no reason to upgrade
+unless you want the version string to match. The binary differs only in that string.
+
+- README now leads with a screenshot of the MCP Server page in GL.iNet's admin panel,
+  captured from a real Flint 4 rather than mocked up.
+- The screenshot shows the recommended *narrow* grant, and its audit tail includes a genuine
+  refusal — `ubus_call` on `dnsmasq.metrics` denied against scopes covering `network.*`,
+  `iwinfo.*`, `system.*` and `gl-clients.*`, with the `allow` line that would cover it. An
+  earlier capture showed `scope: *`, which contradicted the README's own advice to start
+  narrow.
+
 ## v0.3.0
 
 A status page inside the router's own web UI, under **Applications → MCP Server**: daemon
