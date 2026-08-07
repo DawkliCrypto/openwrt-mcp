@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.3.2
+
+**Fixes a bug that hid the status page on any router not in "router" net mode.** Worth
+upgrading if you run GL.iNet firmware and the page never appeared.
+
+### Fixed
+
+- `menu.d/openwrt-mcp.json` declared `show_mode: ["router"]`, copied from AdGuard Home
+  without checking whether it applied. It does not: openwrt-mcp exposes `ubus` and `uci`,
+  which exist in every net mode, so there is no mode in which the daemon runs but its status
+  page should be invisible. The key is now omitted, matching `plugins`, and the page appears
+  in every mode.
+
+Found by installing on a second device — a Slate 7 Pro (GL-BE10000) running firmware 4.8.4
+in **ap** mode. Everything worked except the visible part: the package installed, the RPC
+answered, `ui.get_menu_list` returned the entry and the view was served, but the nav had no
+item. AdGuard Home, Tailscale and ZeroTier were missing too — all declaring
+`show_mode: ["router"]` — so the SPA was faithfully honouring a declaration that was wrong.
+
+### Verified
+
+The published `.ipk` installed unchanged on the Slate 7 Pro: different SoC (mt7987 vs
+mt7988), different firmware (4.8.4 vs 4.9.0), same `aarch64_cortex-a53`. Auth matrix, scope
+gate, response pruning, the RPC module and its access gate all behaved as on the Flint 4, and
+the page now renders in both router and ap mode.
+
 ## v0.3.1
 
 Documentation only — **no functional change from v0.3.0**, so there is no reason to upgrade
