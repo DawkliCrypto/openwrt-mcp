@@ -16,7 +16,7 @@ The other OpenWrt MCP servers I could find run *off*-router — they SSH in from
 workstation on every call. This one is resident: a single static Go binary under procd,
 always on, with its own authorisation and audit trail.
 
-It exposes six generic tools rather than a hand-written catalogue of router features.
+It exposes seven generic tools rather than a hand-written catalogue of router features.
 `ubus list -v` already self-describes every object, method and argument signature on the
 box, so the agent discovers what your router can actually do instead of trusting a list
 that goes stale with each firmware update. On a GL.iNet box that means the vendor's own

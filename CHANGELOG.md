@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `uci_get` -- read current UCI configuration (via `uci show`) through the same policy gate
+  as every other tool. Closes the read gap: an agent can inspect state before an `uci_apply`
+  without being granted `exec` (a root shell) or a broad ubus `uci.*` scope just to look. Its
+  policy scope mirrors `uci_apply` (`<config>[.<section>[.<option>]]`), so one grant reasons
+  about reads and writes symmetrically.
+
 ## v0.4.0
 
 **An optional TOTP second factor for the tools that can change or read anything.** Opt-in per

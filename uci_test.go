@@ -144,3 +144,49 @@ func TestValidateChange(t *testing.T) {
 		})
 	}
 }
+
+func TestUciGetScope(t *testing.T) {
+	cases := []struct {
+		in   uciGetIn
+		want string
+	}{
+		{uciGetIn{Config: "dhcp"}, "dhcp"},
+		{uciGetIn{Config: "dhcp", Section: "lan"}, "dhcp.lan"},
+		{uciGetIn{Config: "dhcp", Section: "lan", Option: "ipaddr"}, "dhcp.lan.ipaddr"},
+	}
+	for _, c := range cases {
+		got := uciGetScope(c.in)
+		if len(got) != 1 || got[0] != c.want {
+			t.Errorf("uciGetScope(%+v) = %q, want [%q]", c.in, got, c.want)
+		}
+	}
+}
+
+// A "<config>.*" grant covers reading any section or option, but NOT a whole-config dump,
+// which addresses bare "<config>". "<config>*" (no dot) covers everything under the config.
+func TestUciGetScopeCoverage(t *testing.T) {
+	covered := func(glob, scope string) bool {
+		_, ok := firstUncovered([]string{glob}, []string{scope})
+		return ok
+	}
+	if !covered("dhcp.*", "dhcp.lan") || !covered("dhcp.*", "dhcp.lan.ip") {
+		t.Error("dhcp.* should cover section and option reads")
+	}
+	if covered("dhcp.*", "dhcp") {
+		t.Error("dhcp.* must NOT cover a whole-config read")
+	}
+	for _, s := range []string{"dhcp", "dhcp.lan", "dhcp.lan.ip"} {
+		if !covered("dhcp*", s) {
+			t.Errorf("dhcp* should cover %q", s)
+		}
+	}
+}
+
+func TestUciGetValidation(t *testing.T) {
+	if _, _, err := uciGet(t.Context(), uciGetIn{}); err == nil {
+		t.Error("empty config should error")
+	}
+	if _, _, err := uciGet(t.Context(), uciGetIn{Config: "dhcp", Option: "ip"}); err == nil {
+		t.Error("option without a section should error")
+	}
+}

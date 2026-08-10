@@ -124,6 +124,42 @@ func uciScopes(in uciApplyIn) []string {
 	return out
 }
 
+// uciGetScope is the read counterpart of uciScopes: a read is scoped with the same identity
+// a write would use (see uciKey). A whole-config read addresses just "<config>", so it is
+// covered by a "<config>" or "<config>*" grant but deliberately NOT by "<config>.*" --
+// reading every section of a config is a broader permission than reading one named section.
+func uciGetScope(in uciGetIn) []string {
+	key := in.Config
+	if in.Section != "" {
+		key += "." + in.Section
+		if in.Option != "" {
+			key += "." + in.Option
+		}
+	}
+	return []string{key}
+}
+
+// uciGet reads current configuration with `uci show`. It is the read path uci_apply lacked:
+// an agent can inspect state before changing it without being handed exec (a root shell) or
+// a broad ubus "uci.*" grant merely to look.
+func uciGet(ctx context.Context, in uciGetIn) (string, string, error) {
+	if in.Config == "" {
+		return "", "", fmt.Errorf("config is required")
+	}
+	if in.Option != "" && in.Section == "" {
+		return "", "", fmt.Errorf("option requires a section")
+	}
+	sel := in.Config
+	if in.Section != "" {
+		sel += "." + in.Section
+		if in.Option != "" {
+			sel += "." + in.Option
+		}
+	}
+	out, err := run(ctx, defaultCmdTimeout, "uci", "show", sel)
+	return out, "read " + sel, err
+}
+
 // ubusCall is the ubus_call handler. It is a named function rather than a closure so a test
 // can assert that the reply really is pruned on the way out -- deleting the pruneUbusJSON
 // call here has to break something, or the pruner's own unit tests prove nothing about
@@ -218,6 +254,12 @@ type uciConfirmIn struct {
 	Token string `json:"token" jsonschema:"the confirm_token returned by uci_apply"`
 }
 
+type uciGetIn struct {
+	Config  string `json:"config" jsonschema:"UCI config to read, e.g. 'dhcp' or 'network'"`
+	Section string `json:"section,omitempty" jsonschema:"section to narrow to, e.g. 'lan' or '@wifi-iface[0]'. Omit to read the whole config."`
+	Option  string `json:"option,omitempty" jsonschema:"option to read a single value. Omit to read the whole section."`
+}
+
 type execIn struct {
 	Argv    []string `json:"argv" jsonschema:"command and arguments, executed directly without a shell. argv[0] is the policy scope."`
 	Timeout int      `json:"timeout,omitempty" jsonschema:"seconds before the command is killed (default 30, max 300)"`
@@ -287,6 +329,15 @@ func (s *Server) newServerForClient(client string) *mcp.Server {
 		func(ctx context.Context, in uciConfirmIn) (string, string, error) {
 			return s.uciConfirm(ctx, in.Token)
 		})
+
+	addTool(s, srv, client, "uci_get",
+		"Read router configuration. Returns settings as config.section.option=value lines. "+
+			"Give a config to dump it (e.g. dhcp), add a section to narrow, or an option for a single value. "+
+			"Use this to inspect state before changing it with uci_apply -- safer than being handed an exec shell. "+
+			"Policy scope mirrors uci_apply: '<config>', '<config>.<section>' or '<config>.<section>.<option>'. "+
+			"A section- or option-level read is covered by a '<config>.*' grant; a whole-config read needs '<config>'.",
+		uciGetScope,
+		uciGet)
 
 	addTool(s, srv, client, "exec",
 		"Run a command on the router. argv is executed directly with no shell, so pipes, redirection and "+
