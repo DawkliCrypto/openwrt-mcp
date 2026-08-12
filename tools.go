@@ -39,6 +39,33 @@ func run(ctx context.Context, timeout time.Duration, argv ...string) (string, er
 	return out, err
 }
 
+// runStdin is run() with input piped in. It exists for `wg pubkey`, which reads a private
+// key on stdin -- passing key material as an argv element would expose it in /proc to every
+// process on the box for the lifetime of the call.
+func runStdin(ctx context.Context, timeout time.Duration, stdin string, argv ...string) (string, error) {
+	if timeout <= 0 {
+		timeout = defaultCmdTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdin = strings.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	out := stdout.String()
+	if e := strings.TrimSpace(stderr.String()); e != "" {
+		if out != "" {
+			out += "\n"
+		}
+		out += e
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("timed out after %s", timeout)
+	}
+	return out, err
+}
+
 // maxResultBytes caps what any tool may return. A tool result lands in an agent's context
 // window, so an unbounded one is a denial of service against the thing calling it. This is
 // the backstop for output no structural pruning understands -- exec, logread, ubus replies
@@ -354,6 +381,21 @@ func (s *Server) newServerForClient(client string) *mcp.Server {
 			}
 			out, err := run(ctx, clampSec(in.Timeout, 30, 300), in.Argv...)
 			return out, strings.Join(in.Argv, " "), err
+		})
+
+	addTool(s, srv, client, "wg_new_client",
+		"Issue a new WireGuard client for the router's VPN server: generates a keypair, allocates a "+
+			"free tunnel address, saves a peer the vendor UI still lists, and adds it to the running "+
+			"interface without restarting it, so existing sessions are not dropped. Returns the client "+
+			"config together with a QR code to scan straight into the WireGuard app.\n\n"+
+			"Never reuse one client config on two devices -- WireGuard pins a key to one endpoint, so "+
+			"the two will fight and both connections will flap. Issue one client per device.\n\n"+
+			"This returns a NEW PRIVATE KEY in its output. Treat it as a credential: show it to the "+
+			"operator, do not write it to a file or paste it anywhere it will persist. Policy scope is "+
+			"\"wireguard_server.<server section>\"; gating this behind mfa_tools is sensible.",
+		wgScopes,
+		func(ctx context.Context, in wgNewClientIn) (string, string, error) {
+			return s.wgNewClient(ctx, in)
 		})
 
 	addTool(s, srv, client, "mfa_unlock",

@@ -355,7 +355,65 @@ Both were the first choice; neither works for a resident daemon.
 | `uci_confirm` | *(tool-level)* | Cancels the rollback timer. |
 | `exec` | `argv[0]` | Direct exec, **no shell** — no pipes, globs or redirection, and no quoting surface. |
 | `logread` | *(tool-level)* | Split out from `exec` so logs can be granted without a root shell. |
+| `wg_new_client` | `wireguard_server.<server section>`, or `wireguard_server` when unspecified | Issues a WireGuard client: keypair, next free tunnel address, a peer the vendor UI still lists, hot-added with `wg set` so live sessions are not dropped. Returns the config **and a UTF-8 QR** to scan. Emits a private key — see below. |
 | `mfa_unlock` | *(ungated)* | Supplies a TOTP code to open the second-factor window. Ungated because it is how you satisfy the factor; it grants nothing without a valid current code. |
+
+### `wg_new_client`
+
+Adding a VPN client by hand is three fiddly steps — generate a keypair, find a free address,
+write a peer section the vendor UI still recognises — and then you have to get the config onto
+a phone. Transcription is what actually goes wrong, so the tool returns a scannable QR next to
+the text:
+
+```
+Created client "laptop" as peer_1048 at 10.1.0.4/24.
+
+[Interface]
+PrivateKey = ...
+Address = 10.1.0.4/24
+DNS = 10.1.0.1
+MTU = 1420
+
+[Peer]
+PublicKey = ...
+AllowedIPs = 0.0.0.0/0
+Endpoint = eq64078.glddns.com:51820
+PersistentKeepalive = 25
+
+Scan with the WireGuard app:
+
+    █▀▀▀▀▀█ ▄▀ ▀▄█ █▀▀▀▀▀█
+    █ ███ █ ▀█▄▀▄▀ █ ███ █
+    █ ▀▀▀ █ █▄▀ ▄█ █ ▀▀▀ █
+    ▀▀▀▀▀▀▀ █ ▀ █▄ ▀▀▀▀▀▀▀
+    ...
+```
+
+Three things it does deliberately:
+
+- **Hot-adds with `wg set`** rather than restarting the interface. A restart drops every
+  established session, which is a poor trade for adding one client. If the running interface
+  cannot be identified the peer is still committed, and the output says so rather than
+  implying nothing happened.
+- **Prefers the router's dynamic-DNS name** over its WAN address for `Endpoint`. A dynamic
+  address baked into a client config stops working at the next reconnect.
+- **Refuses to reuse an address.** A full subnet is an error, never a silently recycled
+  address — two devices sharing one tunnel address breaks whichever connects second.
+
+**It returns a new private key in its output.** The key is not written to the audit log
+(`audit.jsonl` records arguments and a summary, never tool output), but it does land in the
+context of whatever called it. Show it to the operator and let them scan it; don't save it.
+Issue one client per device — WireGuard pins a key to a single endpoint, so sharing one config
+across two devices makes both connections flap. Gating this tool behind `mfa_tools` is
+sensible:
+
+```
+config policy
+	option client 'claude-code'
+	list tools 'wg_new_client'
+	list scopes 'wireguard_server.*'
+	list mfa_tools 'wg_new_client'
+```
 
 ---
 
