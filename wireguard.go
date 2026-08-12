@@ -95,6 +95,32 @@ func (t *uciTree) sectionsOfType(typ string) []string {
 	return out
 }
 
+// checkServerComplete reports the fields a server section actually lacks. "missing
+// address_v4, public_key or port" sends you looking at all three when only one is absent,
+// and the usual cause -- a section that exists but was never set up, so it has an address
+// and port but no keypair -- is worth naming outright rather than leaving to guesswork.
+func checkServerComplete(t *uciTree, server string) error {
+	var missing []string
+	for _, f := range []struct{ name, val string }{
+		{"address_v4", t.get(server, "address_v4")},
+		{"public_key", t.get(server, "public_key")},
+		{"port", t.get(server, "port")},
+	} {
+		if f.val == "" {
+			missing = append(missing, f.name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	hint := ""
+	if t.get(server, "public_key") == "" && t.get(server, "private_key") == "" {
+		hint = "; the section exists but has no keypair, so the WireGuard server has probably " +
+			"never been set up -- create it in the router UI first"
+	}
+	return fmt.Errorf("server %q is missing %s%s", server, strings.Join(missing, ", "), hint)
+}
+
 // ------------------------------------------------------------------ address allocation
 
 // nextFreeClientIP picks the lowest host address in the server's subnet that no peer
@@ -215,8 +241,8 @@ func (s *Server) wgNewClient(ctx context.Context, in wgNewClientIn) (string, str
 	}
 
 	serverCIDR, serverPub, port := t.get(server, "address_v4"), t.get(server, "public_key"), t.get(server, "port")
-	if serverCIDR == "" || serverPub == "" || port == "" {
-		return "", "", fmt.Errorf("server %q is missing address_v4, public_key or port", server)
+	if err := checkServerComplete(t, server); err != nil {
+		return "", "", err
 	}
 
 	var used []string

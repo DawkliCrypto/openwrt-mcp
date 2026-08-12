@@ -225,3 +225,43 @@ func TestFirstAddr(t *testing.T) {
 		t.Errorf("got %q, want empty for an unparseable CIDR", got)
 	}
 }
+
+// An error naming all three fields sends you looking at all three. This calls the real
+// function rather than re-deriving it, or it would pass with the production code broken.
+func TestMissingServerFieldsAreNamedIndividually(t *testing.T) {
+	// Only public_key absent -- and no private_key either, so the setup hint applies.
+	err := checkServerComplete(parseUCIShow(
+		"wireguard_server.s=servers\nwireguard_server.s.address_v4='10.1.0.1/24'\n"+
+			"wireguard_server.s.port='51820'\n"), "s")
+	if err == nil {
+		t.Fatal("an incomplete server section was accepted")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "public_key") {
+		t.Errorf("message does not name the missing field: %s", msg)
+	}
+	for _, present := range []string{"address_v4", "port"} {
+		if strings.Contains(msg, present) {
+			t.Errorf("message blames %q, which is present: %s", present, msg)
+		}
+	}
+	if !strings.Contains(msg, "never been set up") {
+		t.Errorf("no keypair at all, but the message does not say the server is unconfigured: %s", msg)
+	}
+
+	// A fully configured server must pass.
+	if err := checkServerComplete(parseUCIShow(sampleWGShow), "main_server"); err != nil {
+		t.Errorf("a complete server section was rejected: %v", err)
+	}
+
+	// Missing port only: no keypair hint, since the keypair is fine.
+	err = checkServerComplete(parseUCIShow(
+		"wireguard_server.s=servers\nwireguard_server.s.address_v4='10.1.0.1/24'\n"+
+			"wireguard_server.s.public_key='K='\nwireguard_server.s.private_key='P='\n"), "s")
+	if err == nil || !strings.Contains(err.Error(), "port") {
+		t.Fatalf("expected a port complaint, got %v", err)
+	}
+	if strings.Contains(err.Error(), "never been set up") {
+		t.Errorf("keypair is present but the message claims the server is unconfigured: %v", err)
+	}
+}
