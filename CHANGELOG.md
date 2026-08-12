@@ -1,14 +1,44 @@
 # Changelog
 
-## Unreleased
+## v0.5.0
+
+**Issue a WireGuard client and show a QR to scan it**, plus `uci_get` to read configuration
+without a root shell.
 
 ### Added
+
+- `wg_new_client` -- issues a WireGuard client for the router's VPN server: generates a
+  keypair, allocates the next free tunnel address, writes a peer the vendor UI still lists,
+  and returns the config together with a UTF-8 QR code. Adding a client by hand is three
+  fiddly steps and then a config has to reach a phone; transcription is what actually goes
+  wrong, so the QR sits next to the text.
+
+  It hot-adds the peer with `wg set` rather than restarting the interface -- a restart drops
+  every established session, a poor trade for adding one client. If the running interface
+  cannot be identified the peer is still committed and the output says so. It prefers the
+  router's dynamic-DNS name over its WAN address for `Endpoint`, since a dynamic address
+  baked into a client config stops working at the next reconnect. A full subnet is an error,
+  never a recycled address: two devices sharing one tunnel address breaks whichever connects
+  second, and it fails silently.
+
+  The tool returns a new private key. It never reaches `audit.jsonl`, which records arguments
+  and a summary but not tool output, and `wg pubkey` reads the key on stdin so it is never in
+  argv where `/proc` would expose it. It does land in the caller's context, so issue one
+  client per device and consider gating the tool behind `mfa_tools`.
 
 - `uci_get` -- read current UCI configuration (via `uci show`) through the same policy gate
   as every other tool. Closes the read gap: an agent can inspect state before an `uci_apply`
   without being granted `exec` (a root shell) or a broad ubus `uci.*` scope just to look. Its
   policy scope mirrors `uci_apply` (`<config>[.<section>[.<option>]]`), so one grant reasons
   about reads and writes symmetrically.
+
+### Fixed
+
+- `wg_new_client` names the server field that is actually absent. A section with an address
+  and port but no keypair -- a VPN server that was never set up -- reported "missing
+  address_v4, public_key or port", sending you to check all three. It now names only what is
+  missing and, when there is no keypair at all, says the server has probably never been
+  configured.
 
 ## v0.4.0
 
