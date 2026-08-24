@@ -1,1 +1,18 @@
-<!doctype html><title>openwrt-mcp</title><h1>openwrt-mcp</h1><p>Pending first release publish.</p>
+<!doctype html>
+<meta charset="utf-8">
+<title>openwrt-mcp downloads</title>
+<h1>openwrt-mcp v0.5.17</h1>
+<ul>
+  <li><a href="./openwrt-mcp_0.5.17_aarch64_cortex-a53.apk">Download APK (aarch64_cortex-a53)</a></li>
+  <li><a href="./openwrt-mcp_0.5.17_src.tar.gz">Download source archive</a></li>
+  <li><a href="./keys/openwrt-mcp-apk.pem">Download public signing key</a></li>
+  <li><a href="./packages/apk/packages.adb">OpenWrt APK feed index</a></li>
+</ul>
+<h2>Feed-style install</h2>
+<pre><code>ssh root@192.168.0.1 'cat /etc/apk/arch'
+ssh root@192.168.0.1 <<'APK_EOF'
+wget -O /etc/apk/keys/openwrt-mcp-apk.pem   https://dawklicrypto.github.io/openwrt-mcp/keys/openwrt-mcp-apk.pem
+printf '%s\n'   'https://dawklicrypto.github.io/openwrt-mcp/packages/apk/packages.adb'   >> /etc/apk/repositories.d/customfeeds.list
+apk update
+apk add openwrt-mcp
+APK_EOF</code></pre>
