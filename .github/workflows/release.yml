@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
+
+permissions:
+  contents: read
+
+env:
+  PKG_NAME: openwrt-mcp
+  APK_ARCH: aarch64_cortex-a53
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version=$(sed -n 's/^var version = "\(.*\)"/\1/p' main.go)
+          fi
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install apk-tools 3
+        run: |
+          set -eu
+          apk_pkg=$(curl -fsSL https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/ |
+            sed -n 's/.*href="\(apk-tools-static-[^"]*\.apk\)".*/\1/p' | tail -1)
+          test -n "$apk_pkg"
+          curl -fsSL -o /tmp/apk-tools-static.apk \
+            "https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/$apk_pkg"
+          mkdir -p /tmp/apk-tools-static
+          tar -xzf /tmp/apk-tools-static.apk -C /tmp/apk-tools-static
+          echo /tmp/apk-tools-static/sbin >> "$GITHUB_PATH"
+
+      - name: Build APK
+        run: make apk APK_ARCH="$APK_ARCH" VERSION="${{ steps.version.outputs.version }}"
+
+      - name: Verify package contents
+        run: |
+          set -eu
+          package="${PKG_NAME}_${{ steps.version.outputs.version }}_${APK_ARCH}.apk"
+          test -f "$package"
+          mkdir /tmp/apk-extract
+          (cd /tmp/apk-extract && apk.static --allow-untrusted extract "$GITHUB_WORKSPACE/$package")
+          for path in \
+            usr/bin/openwrt-mcp \
+            etc/init.d/openwrt-mcp \
+            etc/config/openwrt-mcp \
+            lib/upgrade/keep.d/openwrt-mcp; do
+            test -f "/tmp/apk-extract/$path"
+          done
+
+      - name: Prepare artifacts
+        run: |
+          set -eu
+          version="${{ steps.version.outputs.version }}"
+          mkdir -p dist/source
+          cp "${PKG_NAME}_${version}_${APK_ARCH}.apk" dist/
+          mkdir -p "dist/source/${PKG_NAME}_${version}"
+          cp -r files ui go.mod go.sum *.go Makefile mkapk.sh \
+            "dist/source/${PKG_NAME}_${version}/"
+          tar -czf "dist/${PKG_NAME}_${version}_src.tar.gz" \
+            -C dist/source "${PKG_NAME}_${version}"
+          rm -rf dist/source
+          ls -la dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist/
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: release
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            Download the APK for `aarch64_cortex-a53`, then run:
+
+            ```sh
+            apk add --allow-untrusted openwrt-mcp-*.apk
+            ```
+
+            The source archive contains the files needed to build the package locally with
+            `make apk`.
+          files: release/*
