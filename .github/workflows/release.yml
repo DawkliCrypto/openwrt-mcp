@@ -163,7 +163,6 @@ jobs:
           test -n "$apk"
           test -n "$source_archive"
           cp "site/$apk" site/packages/apk/
-          cp "site/$source_archive" site/
           openssl genrsa -out site/private-key.pem 2048 >/dev/null 2>&1
           openssl rsa -in site/private-key.pem -pubout -out site/keys/openwrt-mcp-apk.pem >/dev/null 2>&1
           chmod 600 site/private-key.pem
