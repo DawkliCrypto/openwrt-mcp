@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.1
+
+The APK and source archive are now published through GitHub Pages when a release tag is
+created.
+
 ## v0.5.0
 
 **Issue a WireGuard client and show a QR to scan it**, plus `uci_get` to read configuration
