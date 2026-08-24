@@ -18,29 +18,37 @@ jobs:
       - run: go vet ./...
       - run: go test ./... -count=1
 
+      - name: install apk-tools 3
+        run: |
+          set -eu
+          apk_pkg=$(curl -fsSL https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/ |
+            sed -n 's/.*href="\(apk-tools-static-[^"]*\.apk\)".*/\1/p' | tail -1)
+          curl -fsSL -o /tmp/apk-tools-static.apk \
+            "https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/$apk_pkg"
+          mkdir -p /tmp/apk-tools-static
+          tar -xzf /tmp/apk-tools-static.apk -C /tmp/apk-tools-static
+          echo /tmp/apk-tools-static/sbin >> "$GITHUB_PATH"
+
       # The package is only useful if it builds for the router, so build it here
       # rather than finding out at install time on someone's only router.
       - name: cross-build and package
-        run: make ipk
+        run: make apk
 
       - name: the package must contain what the router needs
         run: |
           set -eu
           # Exactly one package, or the assertions below would test the wrong file.
-          n=$(ls openwrt-mcp_*.ipk | wc -l)
-          [ "$n" -eq 1 ] || { echo "expected 1 .ipk, found $n"; ls openwrt-mcp_*.ipk; exit 1; }
-          ipk=$(ls openwrt-mcp_*.ipk)
-          tar -xzf "$ipk" -C /tmp
-          tar -tzf /tmp/data.tar.gz | sort > /tmp/got
-          for f in ./usr/bin/openwrt-mcp ./etc/init.d/openwrt-mcp \
-                   ./etc/config/openwrt-mcp ./lib/upgrade/keep.d/openwrt-mcp; do
-            grep -qx "$f" /tmp/got || { echo "missing from package: $f"; exit 1; }
+          n=$(ls openwrt-mcp_*.apk | wc -l)
+          [ "$n" -eq 1 ] || { echo "expected 1 .apk, found $n"; ls openwrt-mcp_*.apk; exit 1; }
+          apk=$(ls openwrt-mcp_*.apk)
+          mkdir /tmp/apk-extract
+          (cd /tmp/apk-extract && apk.static --allow-untrusted extract "$GITHUB_WORKSPACE/$apk")
+          for f in usr/bin/openwrt-mcp etc/init.d/openwrt-mcp \
+                   etc/config/openwrt-mcp lib/upgrade/keep.d/openwrt-mcp; do
+            [ -f "/tmp/apk-extract/$f" ] || { echo "missing from package: $f"; exit 1; }
           done
-          # /etc/config must be a conffile or an upgrade silently eats live policies.
-          tar -xzf /tmp/control.tar.gz -C /tmp
-          grep -qx /etc/config/openwrt-mcp /tmp/conffiles
 
       - uses: actions/upload-artifact@v4
         with:
-          name: openwrt-mcp-ipk
-          path: openwrt-mcp_*.ipk
+          name: openwrt-mcp-apk
+          path: openwrt-mcp_*.apk

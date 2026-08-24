@@ -1,0 +1,15 @@
+{
+	"admin/services/openwrt-mcp": {
+		"title": "MCP Server",
+		"order": 90,
+		"action": {
+			"type": "view",
+			"path": "openwrt-mcp/status"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-openwrt-mcp"
+			]
+		}
+	}
+}

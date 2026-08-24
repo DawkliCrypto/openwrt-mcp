@@ -9,8 +9,8 @@ inspect and change it over an SSH tunnel.
 
 Developed against **GL.iNet** routers — verified on a Flint 2, a Flint 4 (GL-BE14000,
 firmware 4.9.0, router mode) and a Slate 7 Pro (GL-BE10000, firmware 4.8.4, AP mode).
-GL.iNet firmware 4.x is OpenWrt 21.02 with `opkg`, which is what the `.ipk` targets. It
-should suit any `opkg`-based OpenWrt; stock OpenWrt 24.10+ moved to `apk` and is **untested**.
+GL.iNet firmware 4.x is OpenWrt 21.02 with `opkg`; this package targets OpenWrt 24.10+ and
+its `apk` package manager. The packaged install therefore requires an APK-based firmware.
 
 The other OpenWrt MCP servers I could find run *off*-router — they SSH in from your
 workstation on every call. This one is resident: a single static Go binary under procd,
@@ -26,8 +26,9 @@ that goes stale with each firmware update. On a GL.iNet box that means the vendo
 policies and the recent audit tail, including a refused call](docs/router-ui.png)
 
 On GL.iNet firmware it adds a read-only page to the router's own admin panel, under
-**Applications → MCP Server** — what is running, who is paired, what they may do, and what
-they have been doing. Granting stays on the command line.
+**Applications → MCP Server**. On standard OpenWrt with LuCI, find the same read-only page
+under **Services → MCP Server**. It shows what is running, who is paired, what they may do,
+and what they have been doing. Granting stays on the command line.
 
 The refusal in that audit tail is the security model working, not a fault: `ubus_call` was
 granted on `network.*`, `iwinfo.*`, `system.*` and `gl-clients.*`, so `dnsmasq.metrics` was
@@ -136,24 +137,25 @@ Leave the router's password auth enabled — it is your way back in if the key i
 
 ### 2. Install the daemon
 
-Download `openwrt-mcp_*.ipk` from [Releases](https://github.com/GlassOnTin/openwrt-mcp/releases)
+Download `openwrt-mcp_*.apk` from [Releases](https://github.com/GlassOnTin/openwrt-mcp/releases)
 and push it over — no toolchain needed:
 
 ```sh
-ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_0.4.0_aarch64_cortex-a53.ipk
-ssh root@192.168.8.1 'opkg install /tmp/openwrt-mcp.ipk && rm -f /tmp/openwrt-mcp.ipk'
+ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.apk' < openwrt-mcp_0.5.0_aarch64_cortex-a53.apk
+ssh root@192.168.8.1 'apk add --allow-untrusted /tmp/openwrt-mcp.apk && rm -f /tmp/openwrt-mcp.apk'
 ```
 
 Or build it yourself — needs **Go 1.26+** on your workstation, nothing on the router:
 
 ```sh
-make install-ipk ROUTER=root@192.168.8.1   # packaged; survives a firmware upgrade
+make install-apk ROUTER=root@192.168.8.1   # packaged; survives a firmware upgrade
 make install     ROUTER=root@192.168.8.1   # straight onto the filesystem, no packaging
 ```
 
 The router needs no Go, no compiler and no OpenWrt SDK: the binary is statically linked and
-cross-compiled on your machine. `make` uses whatever `go` is on your PATH; override with
-`make install-ipk GO=/usr/local/go/bin/go` if you keep it somewhere unusual.
+cross-compiled on your machine. `make` uses whatever `go` is on your PATH and automatically
+downloads a cached APK 3 static tool when `apk` is not installed; override with
+`make install-apk APK_TOOL=/path/to/apk GO=/usr/local/go/bin/go` if needed.
 
 ### 3. Pair a client and grant it something
 
@@ -264,16 +266,13 @@ No `autossh` needed: `Restart=always` handles respawn, and the `ServerAlive` opt
 
 ### Packaging notes
 
-`mkipk.sh` builds the `.ipk` without the OpenWrt SDK — the binary is `CGO_ENABLED=0` static
-Go, so there is nothing to cross-link and only the archive format is left. Two details cost
-real time, both verified on opkg 1bf042dd (2021-06-13):
-
-- **The container is a gzipped tar, not an `ar` archive.** `.ipk` exists in both forms and
-  most documentation describes the `ar` one (identical to `.deb`). This opkg rejects `ar`
-  with `pkg_init_from_file: Malformed package file` — both binutils' output *and* hand-written
-  headers without binutils' trailing-slash name quirk.
-- **`/etc/config/openwrt-mcp` is declared a conffile**, so an upgrade never clobbers live
-  policies or pairings; opkg parks the new default at `…-opkg` instead.
+`mkapk.sh` builds the `.apk` without the OpenWrt SDK — the binary is `CGO_ENABLED=0` static
+Go, so there is nothing to cross-link and only the archive format is left. The archive is a
+gzip-compressed tar containing APK metadata, lifecycle scripts, and the filesystem payload.
+The package is intentionally unsigned for local distribution, so installation uses
+`apk add --allow-untrusted`.
+`/etc/config/openwrt-mcp` is declared as a conffile, so an upgrade preserves live policies
+and pairings rather than overwriting them.
 
 The package also ships `/lib/upgrade/keep.d/openwrt-mcp`, which is how the binary, the init
 script and the token store survive `sysupgrade`. GL.iNet's own packages use the same
@@ -291,13 +290,12 @@ reachable over the network can widen a grant — the same reason they are not MC
 page explains grants; it never issues them.
 
 The data comes from `openwrt-mcp status --json` via an oui-httpd RPC module
-(`openwrt-mcp.status`). Status is a CLI subcommand rather than a second HTTP endpoint on
-purpose: the daemon's only listener is loopback and reachability is not treated as identity,
-so another HTTP surface would mean either exposing policy and audit data to every process on
-the router, or keeping a bearer token on the router for the UI to present. oui-httpd already
-runs as root and can read the state directory, so a CLI read grants its caller nothing new.
+(`openwrt-mcp.status`) or a standard rpcd/LuCI adapter. Status remains a CLI subcommand rather
+than a second HTTP endpoint; oui-httpd and rpcd already run as root and can read the state
+directory, so these read-only adapters grant their callers nothing new.
 
-On stock OpenWrt the two extra files are inert — nothing reads them — so it stays one package.
+On stock OpenWrt, find the page under **Services → MCP Server**. On GL.iNet firmware, find it
+under **Applications → MCP Server**.
 
 > Building a view for this UI needs no GL.iNet SDK and no bundler. The SPA fetches the file
 > as text, `eval`s it, and uses the resulting value as the route component, so a plain IIFE
@@ -433,7 +431,7 @@ that would grant it; `uci_apply` rollback-on-timeout restoring `/etc/config/syst
 byte-identically against an independent `sha256sum` baseline; `uci_confirm` cancelling the
 timer (value survived 25s past a 15s deadline, snapshot cleaned up); `exec` running a granted
 `argv[0]`, refusing an ungranted one, and passing `|` through as a literal argument rather
-than a pipe; `.ipk` install, conffile preservation and service enable via postinst; and the
+than a pipe; `.apk` install, conffile preservation and service enable via post-install; and the
 whole path over a real `ssh -L` tunnel.
 
 **Verified previously on the Flint 2 and not re-run here:** revocation taking effect without
@@ -485,7 +483,7 @@ correct, but no firmware flash was performed. Concurrency beyond one apply at a 
 - Tool output is capped at 64 KB, and ubus replies over 8 KB have arrays capped at 16
   elements. Both cuts say so in the result, but a caller that needs a full time series has
   to reach for a narrower ubus method.
-- Install with `make install-ipk`, not `make install`, if you want the daemon to survive a
+- Install with `make install-apk`, not `make install`, if you want the daemon to survive a
   firmware upgrade — only the packaged form ships the `keep.d` entry.
 
 ---

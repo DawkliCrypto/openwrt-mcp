@@ -5,6 +5,9 @@
 **Issue a WireGuard client and show a QR to scan it**, plus `uci_get` to read configuration
 without a root shell.
 
+This release packages for OpenWrt 24.10+ with `apk` instead of the previous `opkg`/`.ipk`
+format. The packaged install path no longer targets GL.iNet firmware 4.x.
+
 ### Added
 
 - `wg_new_client` -- issues a WireGuard client for the router's VPN server: generates a

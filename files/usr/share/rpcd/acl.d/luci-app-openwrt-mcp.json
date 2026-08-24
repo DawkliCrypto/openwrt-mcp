@@ -1,0 +1,12 @@
+{
+	"luci-app-openwrt-mcp": {
+		"description": "Read the openwrt-mcp daemon status",
+		"read": {
+			"ubus": {
+				"luci.openwrt_mcp": [
+					"status"
+				]
+			}
+		}
+	}
+}

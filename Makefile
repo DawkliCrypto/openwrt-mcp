@@ -34,16 +34,16 @@ stage: build
 # Version comes from the binary, so the package can never claim a version it isn't.
 VERSION = $(shell sed -n 's/^var version = "\(.*\)"/\1/p' main.go)
 
-ipk: build
-	./mkipk.sh openwrt-mcp.$(ARCH) $(VERSION) $(IPK_ARCH)
+apk: build
+	./mkapk.sh openwrt-mcp.$(ARCH) $(VERSION) $(APK_ARCH)
 
 # Unlike `install`, this survives a firmware upgrade: the package ships a
-# /lib/upgrade/keep.d entry, and opkg treats /etc/config as a conffile.
-install-ipk: ipk
-	ssh $(ROUTER) 'cat > /tmp/openwrt-mcp.ipk' < openwrt-mcp_$(VERSION)_$(or $(IPK_ARCH),aarch64_cortex-a53).ipk
-	ssh $(ROUTER) 'opkg install --force-reinstall /tmp/openwrt-mcp.ipk && rm -f /tmp/openwrt-mcp.ipk'
+# /lib/upgrade/keep.d entry, and apk treats /etc/config as a conffile.
+install-apk: apk
+	ssh $(ROUTER) 'cat > /tmp/openwrt-mcp.apk' < openwrt-mcp_$(VERSION)_$(or $(APK_ARCH),aarch64_cortex-a53).apk
+	ssh $(ROUTER) 'apk add --allow-untrusted /tmp/openwrt-mcp.apk && rm -f /tmp/openwrt-mcp.apk'
 
 clean:
-	rm -f openwrt-mcp openwrt-mcp.* *.ipk
+	rm -f openwrt-mcp openwrt-mcp.* *.apk
 
-.PHONY: test build install stage ipk install-ipk clean
+.PHONY: test build install stage apk install-apk clean

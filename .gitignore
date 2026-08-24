@@ -3,7 +3,7 @@
 # other payload file named after the package, and silently drops them from commits.
 /openwrt-mcp
 /openwrt-mcp.*
-/*.ipk
+/*.apk
 
 # docs/screenshot.js needs puppeteer-core; it is a tool for regenerating an image, not a
 # dependency of the daemon, so it is installed on demand rather than declared.

@@ -237,7 +237,7 @@ func parseDuration(s string) (time.Duration, error) {
 func usage() {
 	fmt.Fprintf(os.Stderr, `openwrt-mcp %s -- an MCP server hosted on the router
 
-  serve                                       run the daemon (loopback only)
+	serve                                       run the daemon (loopback only)
   pair     <client>                           mint a bearer token, printed once
   unpair   <client>                           revoke every token for a client
   clients                                     list paired clients

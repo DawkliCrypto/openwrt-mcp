@@ -1,0 +1,14 @@
+#!/bin/sh
+
+case "$1" in
+	list)
+		printf '%s\n' '{"status":{}}'
+		;;
+	call)
+		[ "$2" = "status" ] || exit 1
+		exec /usr/bin/openwrt-mcp status --json --audit 20
+		;;
+	*)
+		exit 1
+		;;
+esac
