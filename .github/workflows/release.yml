@@ -135,6 +135,12 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Reset Pages staging dir
+        run: |
+          set -eu
+          rm -rf site
+          mkdir -p site
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
