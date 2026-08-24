@@ -40,7 +40,7 @@ apk: build
 # Unlike `install`, this survives a firmware upgrade: the package ships a
 # /lib/upgrade/keep.d entry, and apk treats /etc/config as a conffile.
 install-apk: apk
-	ssh $(ROUTER) 'cat > /tmp/openwrt-mcp.apk' < openwrt-mcp_$(VERSION)_$(or $(APK_ARCH),aarch64_cortex-a53).apk
+	ssh $(ROUTER) 'cat > /tmp/openwrt-mcp.apk' < openwrt-mcp-$(VERSION).apk
 	ssh $(ROUTER) 'apk add --allow-untrusted /tmp/openwrt-mcp.apk && rm -f /tmp/openwrt-mcp.apk'
 
 clean:

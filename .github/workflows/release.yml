@@ -61,7 +61,7 @@ jobs:
       - name: Verify package contents
         run: |
           set -eu
-          package="${PKG_NAME}_${{ steps.version.outputs.version }}_${APK_ARCH}.apk"
+          package="${PKG_NAME}-${{ steps.version.outputs.version }}.apk"
           test -f "$package"
           mkdir /tmp/apk-extract
           (cd /tmp/apk-extract && apk.static --allow-untrusted extract "$GITHUB_WORKSPACE/$package")
@@ -78,7 +78,7 @@ jobs:
           set -eu
           version="${{ steps.version.outputs.version }}"
           mkdir -p dist/source
-          cp "${PKG_NAME}_${version}_${APK_ARCH}.apk" dist/
+          cp "${PKG_NAME}-${version}.apk" dist/
           mkdir -p "dist/source/${PKG_NAME}_${version}"
           cp -r files ui go.mod go.sum *.go Makefile mkapk.sh \
             "dist/source/${PKG_NAME}_${version}/"

@@ -137,11 +137,11 @@ Leave the router's password auth enabled — it is your way back in if the key i
 
 ### 2. Install the daemon
 
-Download `openwrt-mcp_*.apk` from [Releases](https://github.com/GlassOnTin/openwrt-mcp/releases)
+Download `openwrt-mcp-*.apk` from [Releases](https://github.com/GlassOnTin/openwrt-mcp/releases)
 and push it over — no toolchain needed:
 
 ```sh
-ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.apk' < openwrt-mcp_0.5.0_aarch64_cortex-a53.apk
+ssh root@192.168.8.1 'cat > /tmp/openwrt-mcp.apk' < openwrt-mcp-0.5.0.apk
 ssh root@192.168.8.1 'apk add --allow-untrusted /tmp/openwrt-mcp.apk && rm -f /tmp/openwrt-mcp.apk'
 ```
 

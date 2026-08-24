@@ -38,9 +38,9 @@ jobs:
         run: |
           set -eu
           # Exactly one package, or the assertions below would test the wrong file.
-          n=$(ls openwrt-mcp_*.apk | wc -l)
-          [ "$n" -eq 1 ] || { echo "expected 1 .apk, found $n"; ls openwrt-mcp_*.apk; exit 1; }
-          apk=$(ls openwrt-mcp_*.apk)
+          n=$(ls openwrt-mcp-*.apk | wc -l)
+          [ "$n" -eq 1 ] || { echo "expected 1 .apk, found $n"; ls openwrt-mcp-*.apk; exit 1; }
+          apk=$(ls openwrt-mcp-*.apk)
           mkdir /tmp/apk-extract
           (cd /tmp/apk-extract && apk.static --allow-untrusted extract "$GITHUB_WORKSPACE/$apk")
           for f in usr/bin/openwrt-mcp etc/init.d/openwrt-mcp \
@@ -51,4 +51,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: openwrt-mcp-apk
-          path: openwrt-mcp_*.apk
+          path: openwrt-mcp-*.apk

@@ -12,7 +12,7 @@ BIN=${1:?usage: mkapk.sh <binary> <version> [arch]}
 VERSION=${2:?usage: mkapk.sh <binary> <version> [arch]}
 ARCH=${3:-aarch64_cortex-a53}
 PKG=openwrt-mcp
-OUT="${PKG}_${VERSION}_${ARCH}.apk"
+OUT="${PKG}-${VERSION}.apk"
 
 SRC=$(cd "$(dirname "$0")" && pwd)
 BUILD=$(mktemp -d)
