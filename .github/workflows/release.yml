@@ -155,6 +155,8 @@ jobs:
 
       - name: Create signed APK feed
         shell: bash
+        env:
+          APK_SEC_PEM: ${{ secrets.APK_SEC_PEM }}
         run: |
           set -euo pipefail
           mkdir -p site/packages/apk site/keys
@@ -163,9 +165,9 @@ jobs:
           test -n "$apk"
           test -n "$source_archive"
           cp "site/$apk" site/packages/apk/
-          openssl genrsa -out site/private-key.pem 2048 >/dev/null 2>&1
-          openssl rsa -in site/private-key.pem -pubout -out site/keys/openwrt-mcp-apk.pem >/dev/null 2>&1
+          printf '%s' "$APK_SEC_PEM" > site/private-key.pem
           chmod 600 site/private-key.pem
+          openssl rsa -in site/private-key.pem -pubout -out site/keys/openwrt-mcp-apk.pem >/dev/null 2>&1
           (
             cd site/packages/apk
             apk.static mkndx \
