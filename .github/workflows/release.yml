@@ -128,12 +128,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
       - name: Reset Pages staging dir
         run: |
@@ -224,14 +219,26 @@ jobs:
               f.write(html)
           PY
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v6
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Publish signed feed to GitHub Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/mcp-pages
+          if git clone --quiet --depth 1 --branch gh-pages \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              /tmp/mcp-pages; then
+            find /tmp/mcp-pages -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          else
+            mkdir -p /tmp/mcp-pages
+            git -C /tmp/mcp-pages init -q
+            git -C /tmp/mcp-pages checkout -q --orphan gh-pages
+            git -C /tmp/mcp-pages remote add origin \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          cp -a site/. /tmp/mcp-pages/
+          git -C /tmp/mcp-pages config user.name github-actions[bot]
+          git -C /tmp/mcp-pages config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C /tmp/mcp-pages add -A
+          git -C /tmp/mcp-pages commit -m "Publish signed feed ${GITHUB_REF_NAME}" || true
+          git -C /tmp/mcp-pages push --force origin gh-pages
