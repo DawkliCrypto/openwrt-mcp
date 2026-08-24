@@ -141,24 +141,81 @@ jobs:
           name: release-artifacts
           path: site
 
+      - name: Install apk-tools 3
+        run: |
+          set -eu
+          apk_pkg=$(curl -fsSL https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/ |
+            sed -n 's/.*href="\(apk-tools-static-[^"]*\.apk\)".*/\1/p' | tail -1)
+          test -n "$apk_pkg"
+          curl -fsSL -o /tmp/apk-tools-static.apk \
+            "https://dl-cdn.alpinelinux.org/alpine/edge/main/x86_64/$apk_pkg"
+          mkdir -p /tmp/apk-tools-static
+          tar -xzf /tmp/apk-tools-static.apk -C /tmp/apk-tools-static
+          echo /tmp/apk-tools-static/sbin >> "$GITHUB_PATH"
+
+      - name: Create signed APK feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site/packages/apk site/keys
+          apk=$(find site -maxdepth 1 -name '*.apk' -printf '%f\n' | head -n 1)
+          source_archive=$(find site -maxdepth 1 -name '*_src.tar.gz' -printf '%f\n' | head -n 1)
+          test -n "$apk"
+          test -n "$source_archive"
+          cp "site/$apk" site/packages/apk/
+          cp "site/$source_archive" site/
+          openssl genrsa -out site/private-key.pem 2048 >/dev/null 2>&1
+          openssl rsa -in site/private-key.pem -pubout -out site/keys/openwrt-mcp-apk.pem >/dev/null 2>&1
+          chmod 600 site/private-key.pem
+          (
+            cd site/packages/apk
+            apk.static mkndx \
+              --root "$GITHUB_WORKSPACE/site" \
+              --keys-dir "$GITHUB_WORKSPACE/site/keys" \
+              --allow-untrusted \
+              --sign "$GITHUB_WORKSPACE/site/private-key.pem" \
+              --output packages.adb *.apk
+          )
+          rm -f site/private-key.pem
+
       - name: Create download page
         shell: bash
         run: |
           set -euo pipefail
-          apk=$(find site -maxdepth 1 -name '*.apk' -printf '%f\n')
-          source_archive=$(find site -maxdepth 1 -name '*_src.tar.gz' -printf '%f\n')
+          apk=$(find site -maxdepth 1 -name '*.apk' -printf '%f\n' | head -n 1)
+          source_archive=$(find site -maxdepth 1 -name '*_src.tar.gz' -printf '%f\n' | head -n 1)
           test -n "$apk"
           test -n "$source_archive"
-          cat > site/index.html <<EOF
-          <!doctype html>
+          APK_PATH="$apk" SOURCE_ARCHIVE="$source_archive" python - <<'PY'
+          import os
+          apk = os.environ['APK_PATH']
+          source_archive = os.environ['SOURCE_ARCHIVE']
+          install_example = """ssh root@192.168.0.1 'cat /etc/apk/arch'
+          ssh root@192.168.0.1 <<'APK_EOF'
+          wget -O /etc/apk/keys/openwrt-mcp-apk.pem \
+            https://dawklicrypto.github.io/openwrt-mcp/keys/openwrt-mcp-apk.pem
+          printf '%s\\n' \
+            'https://dawklicrypto.github.io/openwrt-mcp/packages/apk/packages.adb' \
+            >> /etc/apk/repositories.d/customfeeds.list
+          apk update
+          apk add openwrt-mcp
+          APK_EOF"""
+          html = f'''<!doctype html>
           <meta charset="utf-8">
           <title>openwrt-mcp downloads</title>
-          <h1>openwrt-mcp ${GITHUB_REF_NAME}</h1>
+          <h1>openwrt-mcp {os.environ.get("GITHUB_REF_NAME", "dev")}</h1>
           <ul>
-            <li><a href="$apk">Download APK ($APK_ARCH)</a></li>
-            <li><a href="$source_archive">Download source archive</a></li>
+            <li><a href="./{apk}">Download APK ({os.environ.get("APK_ARCH", "aarch64_cortex-a53")})</a></li>
+            <li><a href="./{source_archive}">Download source archive</a></li>
+            <li><a href="./keys/openwrt-mcp-apk.pem">Download public signing key</a></li>
+            <li><a href="./packages/apk/packages.adb">OpenWrt APK feed index</a></li>
           </ul>
-          EOF
+          <h2>Feed-style install</h2>
+          <pre><code>{install_example}</code></pre>
+          '''
+          with open('site/index.html', 'w', encoding='utf-8') as f:
+              f.write(html)
+          PY
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
