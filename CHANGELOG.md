@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.2
+
+Update the GitHub Pages deployment actions used to publish release downloads.
+
 ## v0.5.1
 
 The APK and source archive are now published through GitHub Pages when a release tag is
