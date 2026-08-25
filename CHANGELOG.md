@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.18
+
+Allow MCP clients behind a reverse proxy to connect using a public hostname while retaining
+bearer-token authentication.
+
 ## v0.5.2
 
 Update the GitHub Pages deployment actions used to publish release downloads.

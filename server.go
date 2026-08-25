@@ -91,7 +91,9 @@ func NewServer(configPath, statePath string) (*Server, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", s.authenticate(mcp.NewStreamableHTTPHandler(s.getServer, nil)))
+	mux.Handle("/mcp", s.authenticate(mcp.NewStreamableHTTPHandler(s.getServer, &mcp.StreamableHTTPOptions{
+		DisableLocalhostProtection: true,
+	})))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Points at its own source. Under the AGPL this was a §13 obligation; under MIT
 		// it is only good manners, but a service that will tell you what it is and where
