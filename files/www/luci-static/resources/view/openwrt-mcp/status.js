@@ -51,7 +51,7 @@ return view.extend({
 				(policy.scopes || []).join(' '), policy.max_per_min,
 				policy.expired ? _('Expired') : text(policy.expires || _('Never'))];
 		});
-		var audit = (status.audit || []).map(function(entry) {
+		var audit = (status.audit || []).slice().reverse().map(function(entry) {
 			return [entry.time, entry.outcome, entry.client, entry.tool,
 				entry.scope, entry.summary || entry.error];
 		});

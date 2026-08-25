@@ -16,7 +16,7 @@ import (
 //
 // Released under the MIT Licence. See the LICENSE file.
 
-var version = "0.5.18"
+var version = "0.5.19"
 
 const sourceURL = "https://github.com/GlassOnTin/openwrt-mcp"
 

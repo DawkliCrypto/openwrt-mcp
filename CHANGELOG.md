@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.19
+
+Show the newest audit entries first in the router status views.
+
 ## v0.5.18
 
 Allow MCP clients behind a reverse proxy to connect using a public hostname while retaining

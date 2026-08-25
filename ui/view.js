@@ -237,8 +237,8 @@
           'No grants. Every gated tool is denied until one is added with: openwrt-mcp allow …')
       ]);
 
-      // ---- audit tail, newest at the bottom as the log has it
-      var audit = (st.audit || []).map(function (a) {
+      // ---- audit tail, newest first for quick status scanning
+      var audit = (st.audit || []).slice().reverse().map(function (a) {
         var colour = a.outcome === 'OK' ? C.ok : (a.outcome === 'DENIED' ? C.warn : C.danger);
         return [
           mono((a.time || '').replace('T', ' ').replace('Z', '')),
